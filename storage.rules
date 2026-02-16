@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Audio recordings from single input (live page)
+    match /audio-recordings/{userId}/{filename} {
+      // Users can read and write their own recordings
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Multi-input recordings (input-routing page)
+    match /multi-input-recordings/{userId}/{filename} {
+      // Users can read and write their own recordings
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Uploaded audio files for distribution
+    match /audio-files/{userId}/{filename} {
+      // Users can read and write their own audio files
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}

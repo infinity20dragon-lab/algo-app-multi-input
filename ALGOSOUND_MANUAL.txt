@@ -1,0 +1,735 @@
+================================================================================
+                        ALGOSOUND - SYSTEM MANUAL
+              Fire Station IP Audio Distribution & Alerting
+================================================================================
+
+
+TABLE OF CONTENTS
+-----------------
+  1.  System Overview
+  2.  Architecture & How Audio Flows
+  3.  Dashboard
+  4.  Station Zones
+  5.  Call Routing
+  6.  Live Monitoring  (primary operational page)
+      6a.  Detection Settings — what each knob actually does
+      6b.  Playback & Volume Controls
+      6c.  Session Volume Ramp
+      6d.  Per-Speaker Volume
+      6e.  Emergency Controls
+      6f.  Emulation Mode
+  7.  Multi-Input Routing
+  8.  Output & Speakers  (device management)
+  9.  PoE Devices
+  10. Activity Log
+  11. Settings
+  12. Recordings
+  13. Hardware Compatibility
+  14. Known Behaviors & Gotchas
+
+
+================================================================================
+1.  SYSTEM OVERVIEW
+================================================================================
+
+AlgoSound is a web-based control panel for Algo IP network audio devices
+deployed in fire stations. Its job is straightforward: pick up audio on a
+microphone, push it out through every speaker in the building in real time,
+and optionally record the whole thing for playback later.
+
+The devices it talks to are Algo IP endpoints — paging adapters (8301),
+ceiling speakers (8198), wall speakers (8180G2), and similar. These devices
+speak a multicast-based audio protocol. The paging adapter is the transmitter;
+the speakers are receivers. AlgoSound controls which multicast group each
+speaker listens to, which is how it switches speakers between active
+(hearing audio) and idle (quiet).
+
+Everything persists in Firebase — Firestore for structured data (devices,
+zones, recordings metadata), Realtime Database for live session state and
+activity logs, and Firebase Storage for audio files.
+
+
+================================================================================
+2.  ARCHITECTURE & HOW AUDIO FLOWS
+================================================================================
+
+The Live Monitoring page is where the real work happens. Everything else in
+the app is either setup (devices, zones) or review (logs, recordings).
+
+When you hit Start Monitoring, this is what happens, in order:
+
+  Microphone
+      |
+      v
+  AudioWorklet  ──> PCM samples pushed to Ring Buffer (60s circular, ~12MB)
+      |
+      v
+  AnalyserNode  ──> Audio level checked every 50ms
+      |                 |
+      |                 v
+      |            Threshold + Sustain check
+      |                 |
+      |          [audio sustained long enough]
+      |                 |
+      |                 v
+      |            MediaRecorder starts  ──>  batches  ──>  Session
+      |            (recording pipeline)                       |
+      |                                                       v
+      |                                              [silence timeout]
+      |                                                       |
+      |                                                       v
+      |                                              Session sealed
+      |                                              Upload to Firebase
+      |
+      v
+  ScriptProcessorNode  (runs continuously, pulls from ring buffer)
+      |
+      |  [waits for hardware to reach STABLE state]
+      |  [waits for ring buffer to accumulate >= playbackDelay worth of samples]
+      |
+      v
+  GainNode  ──>  Analyser  ──>  System audio output  ──>  Paging Device
+                                                            ──>  Speakers
+
+Three independent pipelines, none of them waiting on each other:
+
+  Recording:  MediaRecorder captures Opus-encoded audio in batches.
+              Session boundaries are defined by silence timeout.
+              This is the authority on when a session starts and ends.
+
+  Playback:   ScriptProcessorNode pulls raw PCM from the ring buffer
+              continuously. It outputs silence until hardware is ready and
+              the delay buffer is full. No encoding, no gaps, no decode lag.
+
+  Saving:     When a session is sealed, a frozen copy of its batches goes
+              into a save queue. An async worker combines them, uploads to
+              Firebase Storage, and writes metadata to Firestore.
+              Retries on failure. Never blocks recording or playback.
+
+The hardware state machine for speakers:
+
+  IDLE  -->  ACTIVATING  -->  WAKING  -->  STABLE  -->  PLAYING
+                                                          |
+                                                          v
+                                                      DRAINING  -->  IDLE
+
+  IDLE:         Speakers are on the idle multicast group (224.0.2.60:50022).
+                They are not receiving paging audio.
+
+  ACTIVATING:   API call in flight to flip speakers to the active group.
+
+  WAKING:       Speakers just joined the active group (224.0.2.60:50002).
+                There is a brief window of white noise or click artifacts
+                as they power onto the new stream. Playback is muted here.
+
+  STABLE:       Warmup timer has elapsed. Safe to let audio through.
+                Waiting for the ring buffer to have enough samples.
+
+  PLAYING:      Audio is flowing. This is normal operation.
+
+  DRAINING:     Session audio has been fully played. The grace period timer
+                is counting down. If new audio arrives before it expires,
+                we go back to PLAYING without ever touching the hardware.
+                If it expires, we go to IDLE and flip the speakers back.
+
+
+================================================================================
+3.  DASHBOARD
+================================================================================
+
+The landing page. Shows four stat cards: total devices, audio files in the
+library, configured zones, and overall system status (Active vs Standby).
+
+The floor plan preview is a grid of your zones, color-coded. Each zone shows
+how many speakers are in it. Click "View All" to go to the full zone editor.
+
+Test Alerts section has buttons for Fire, Medical, and All-Call. These are
+placeholder UI at this point — the buttons render but do not trigger actual
+distribution. Use Call Routing for that.
+
+Quick Actions links directly to Live Monitoring, Manage Devices, and
+Call Routing. Recent Activity shows the last few events from the current
+monitoring session if one is running.
+
+
+================================================================================
+4.  STATION ZONES
+================================================================================
+
+Zones are logical groupings of speakers by physical location — engine bay,
+quarters, dispatch, etc. Each zone has a name, a color (for the floor plan),
+and a list of assigned speakers.
+
+The floor plan is an interactive grid. Click any zone to select it, and the
+right panel shows its configuration.
+
+Call Type Routing: Each zone has three toggles — Fire, Medical, All-Call.
+These define which alert types should reach this zone. All three default to
+ON when a zone is created. This is the routing policy layer; it does not
+directly control hardware. It tells the distribution system which zones to
+include when a given alert type fires.
+
+Assigning Devices: Click "Assign Device" to open a picker. You can assign
+or unassign speakers to the zone. A device can only belong to one zone at a
+time. Reassigning it automatically removes it from its previous zone.
+
+Deleting a zone unassigns all its devices first, so nothing is orphaned.
+
+
+================================================================================
+5.  CALL ROUTING
+================================================================================
+
+This page plays pre-uploaded audio files out through your Algo devices.
+Think of it as the manual dispatch tool — you pick a file, pick devices,
+and hit Play.
+
+Audio files come from your library (uploaded elsewhere and stored in
+Firebase Storage). If the library is empty, there is nothing to play here.
+
+Device selection supports both individual picking and zone-based quick
+select. If you have zones configured, buttons appear at the top to toggle
+all devices in a zone at once.
+
+Settings:
+  - Volume: 0-100%, sent to the device as part of the distribution request.
+  - Loop: If checked, the audio repeats on the device until you hit Stop All.
+
+Play sends the request to each selected device sequentially. Results appear
+in real time — green check for success, red X with an error message for
+failures. If a device is a paging adapter (8301), its linked speakers are
+included in the request automatically.
+
+Stop All sends a stop command to every selected device. Use this to cut audio
+that is still looping or playing.
+
+Distribution events are logged to Firestore for audit purposes.
+
+
+================================================================================
+6.  LIVE MONITORING
+================================================================================
+
+This is the primary operational page. Start it, speak into the mic, and the
+audio goes out to your speakers. Everything below explains the controls and
+why they exist.
+
+When you start monitoring:
+  - The browser requests microphone access.
+  - A 200ms silent pre-roll is captured. This becomes the init segment that
+    gets prepended to every saved batch — it keeps the WebM container clean
+    and prevents ghost audio from header bytes.
+  - The PCM capture pipeline starts. Samples flow continuously into the ring
+    buffer regardless of whether audio is detected.
+  - The ScriptProcessorNode starts its continuous loop. It outputs silence
+    until hardware is ready.
+  - Hardware is initialized: all linked speakers are set to the idle multicast
+    group, and each speaker's volume is set to its configured level.
+
+Then you wait. When the mic picks up audio above the threshold for long enough,
+the system kicks into gear: MediaRecorder starts batching, hardware gets
+activated, and after the delay buffer fills, audio starts flowing out.
+
+
+----------------------------------------------------------------------
+6a.  DETECTION SETTINGS — WHAT EACH KNOB ACTUALLY DOES
+----------------------------------------------------------------------
+
+These are the most important settings. Get them wrong and either the system
+triggers on air conditioning noise or it misses the first few seconds of a
+real call. All of them are live-adjustable while monitoring is running.
+
+AUDIO THRESHOLD  (0% – 50%)
+  The minimum audio level the mic has to see before the system considers it
+  "audio." This is a frequency-averaged level, not a peak detector.
+
+  0% = everything triggers. A whisper, a door closing, the HVAC kicking on.
+       Use this if your station is dead quiet and you want to catch anything.
+
+  5-15% = the sweet spot for most stations. Filters out ambient room noise
+       without missing a dispatcher talking at normal volume.
+
+  Higher values = only loud, sustained audio triggers the system. You will
+       miss quiet speech. Don't go above 20% unless you have a specific
+       reason and you've tested it.
+
+  This value is checked every 50ms. It is not debounced on its own — that
+  is what Sustain Duration is for.
+
+
+SUSTAIN DURATION  (0ms – 3000ms)
+  How long the audio level has to stay above the threshold continuously
+  before the system actually triggers. This is the noise filter.
+
+  0ms = instant trigger. The very first sample above threshold starts
+       everything. Nothing is filtered. Every click, pop, or transient
+       will start a session.
+
+  500ms-1000ms = filters out clicks, door slams, short transients. The mic
+       has to see real, sustained audio for half a second before anything
+       happens. This is the default territory.
+
+  2000ms-3000ms = aggressive filtering. You will lose the first 2-3 seconds
+       of actual speech because the system is still waiting to confirm it's
+       real. Only use this if you have extremely noisy environments and have
+       no other choice.
+
+  IMPORTANT: The ring buffer is capturing audio the entire time, even during
+  the sustain window. When the trigger fires, the buffer already has the
+  audio from during the sustain period. You do NOT lose those seconds of
+  speech. What you lose is the recording — MediaRecorder only starts when
+  the trigger fires.
+
+
+PLAYBACK DELAY  (0s – 10s)
+  This controls two things simultaneously:
+
+  1. Speaker warmup time. When speakers switch from idle to active multicast,
+     there is a brief period of noise/clicks as they sync. This delay holds
+     off playback until that settles. The warmup and the delay timer run in
+     parallel, so by the time the delay is satisfied, the speakers are stable.
+
+  2. Ring buffer fill time. The ScriptProcessorNode will not output audio
+     until the ring buffer has accumulated this many seconds of samples. This
+     gives the buffer a head start so playback never starves and stutters.
+
+  Default is 4s. This matches typical speaker wake-up characteristics for
+  Algo 8180/8198 hardware. If you lower it too much, you get clicks at the
+  start of every broadcast. If you raise it too high, there is an annoticeable
+  delay between someone speaking and the speakers picking it up.
+
+  This value also appears in the Hardware Grace Period description because the
+  two are related — see that setting below.
+
+
+SILENCE TIMEOUT  (0s – 30s)
+  This defines session boundaries. A "session" is one continuous chunk of
+  audio that gets recorded and saved as a single file.
+
+  When the mic goes quiet (audio drops below threshold), a timer starts.
+  If audio comes back before this timer expires, it's the same session —
+  no interruption. If the timer expires, the session closes, the recording
+  is sealed, and the save process begins.
+
+  0s = every pause ends the session immediately. You get one recording per
+       continuous utterance. A sentence with a breath in the middle becomes
+       two files.
+
+  8s (default) = pauses up to 8 seconds are tolerated within the same session.
+       A dispatcher saying "Engine 1... respond to..." with a 3-second pause
+       in the middle is one recording, not two.
+
+  Higher values = longer pauses are absorbed into the same session. Use this
+       if your dispatchers speak slowly or there are long gaps between
+       instructions that still belong together. Downside: if there really is
+       silence and the next call is unrelated, they end up in the same file.
+
+  This timer also gates hardware deactivation. The hardware does NOT turn off
+  at silence timeout — it turns off after the grace period (see below) which
+  starts after silence timeout fires.
+
+
+HARDWARE GRACE PERIOD  (1s – 30s)
+  How long the speakers stay on the active multicast group AFTER a session
+  ends before being switched back to idle.
+
+  Why this exists: switching speakers from idle to active takes time. There
+  is the API round trip, the wake-up noise, and the playback delay before
+  audio actually flows. If back-to-back sentences arrive with a gap longer
+  than the silence timeout but shorter than this grace period, the speakers
+  are still active — no re-activation needed, no delay, no clicks.
+
+  The grace period should be >= playback delay. If it is shorter, you get
+  situations where the silence timeout fires, the grace period expires, the
+  speakers go idle, and then 2 seconds later new audio arrives and you have
+  to wait for the full warmup cycle again. The UI shows the current warmup
+  cost next to the slider so you can see the relationship.
+
+  Default is 5s. For stations where calls come in clusters (multiple
+  instructions in quick succession), 10-15s is better. For quiet stations
+  where calls are rare and far apart, 5s is fine — no point keeping speakers
+  on the active group when nothing is coming.
+
+
+----------------------------------------------------------------------
+6b.  PLAYBACK & VOLUME CONTROLS
+----------------------------------------------------------------------
+
+PLAYBACK VOLUME  (0% – 200%)
+  This is the GainNode value on the PCM output chain. It runs in the browser,
+  not on the hardware.
+
+  100% = unity gain. What the mic captures is what the speakers play.
+  200% = amplified. Useful if the mic is picking up a quiet source and you
+         need to boost it before it hits the speakers.
+  0%   = muted. Playback stops but monitoring continues.
+
+  This is a static value. It applies all the time during playback unless
+  Session Volume Ramp is active (see 6c).
+
+
+----------------------------------------------------------------------
+6c.  SESSION VOLUME RAMP
+----------------------------------------------------------------------
+
+Instead of jumping straight to full volume when a session starts, the system
+can ramp up over a configurable duration. This avoids the jarring pop that
+happens when audio suddenly appears at full volume on speakers that have been
+quiet.
+
+  Start Volume: where the ramp begins (e.g., 0% for a clean fade-in).
+  Target Volume: where it ends up (e.g., 200% for a loud broadcast).
+  Ramp Duration: how long the transition takes (0-5s).
+
+The ramp fires once per session, at the moment playback actually starts (not
+when audio is detected, not when hardware activates — when the buffer is
+full and samples start flowing). At the end of the session, volume resets to
+Start Volume, ready for the next one.
+
+SCHEDULE RAMPING: You can restrict ramping to specific hours. Example use
+case: at night, ramp from 0% to 100% over 2 seconds so sleeping personnel
+aren't startled. During the day, skip the ramp and go straight to full
+volume because the station is noisy anyway. The schedule uses PST and
+supports half-hour increments. Overnight ranges (e.g., 6PM-6AM) work
+correctly.
+
+If ramping is enabled but you are outside the scheduled window, the system
+uses the static Playback Volume instead.
+
+
+----------------------------------------------------------------------
+6d.  PER-SPEAKER VOLUME
+----------------------------------------------------------------------
+
+Each speaker has its own max volume setting, independent of the playback
+volume slider. This is set on the hardware via the Algo API during
+initialization.
+
+Algo speakers use a 0-10 integer scale internally. The UI maps this to a
+percentage (0-100%) and converts it to dB for the API:
+
+  Level 10 (100%) =  0dB   (full volume)
+  Level 7  (70%)  = -9dB
+  Level 5  (50%)  = -15dB
+  Level 0  (0%)   = -30dB  (effectively muted)
+
+These volumes are set once when monitoring starts (during hardware
+initialization) and persist until the next initialization. They are saved to
+Firestore so they survive page reloads.
+
+To edit a speaker's max volume: click the "Max: Level X/10" link under the
+speaker name in the Emergency Controls card. Adjust the slider and hit Save.
+The new value is written to Firestore and will take effect the next time
+monitoring starts (or on the next hardware initialization).
+
+
+----------------------------------------------------------------------
+6e.  EMERGENCY CONTROLS
+----------------------------------------------------------------------
+
+KILL ALL: Sends every linked speaker to the idle multicast group
+  (224.0.2.60:50022) immediately. They stop receiving audio. This does NOT
+  touch the paging device — only speakers.
+
+ENABLE ALL: Sends every linked speaker to the active multicast group
+  (224.0.2.60:50002). They start receiving audio again. Speakers are
+  receivers in this system; this puts them back into receive mode.
+
+Individual speaker controls: Each speaker listed has its own enable/disable
+button. Same mechanism as KILL ALL / ENABLE ALL, but for one speaker at a
+time. Useful for troubleshooting a specific speaker or silencing one zone
+without killing everything.
+
+These controls work whether or not monitoring is running. They talk directly
+to the hardware via the Algo settings API.
+
+In Emulation Mode, these controls log what they would do but do not make any
+API calls.
+
+
+----------------------------------------------------------------------
+6f.  EMULATION MODE
+----------------------------------------------------------------------
+
+Toggle this before starting monitoring to run the entire system without any
+physical hardware. It creates 12 virtual speakers and 1 virtual paging device.
+All API calls are skipped; the hardware state machine runs through its normal
+transitions with simulated delays.
+
+Network Delay Simulation: adds an artificial delay to hardware transitions.
+0s = instant. 20s = realistic for a slow network. Useful for testing timeout
+and grace period behavior without waiting for real hardware.
+
+Trigger Test Call: generates a synthetic audio signal for 3, 5, or 10
+seconds. Only works while monitoring is running. Lets you test the full
+pipeline — detection, activation, playback, recording, saving — without
+needing someone to talk into a mic.
+
+Emulation Mode cannot be toggled while monitoring is active. Stop monitoring
+first.
+
+
+================================================================================
+7.  MULTI-INPUT ROUTING
+================================================================================
+
+This page handles a different scenario than Live Monitoring. Where Live
+Monitoring is one mic in, all speakers out, Multi-Input Routing supports
+three simultaneous input channels, each mapped to a different call type:
+
+  Medical  –  one audio input device
+  Fire     –  another audio input device
+  All-Call  –  a third audio input device
+
+Each channel has its own audio level meter, its own silence-delay-based
+recording, and its own set of speakers (assigned via the device's
+inputAssignment field on the Output & Speakers page).
+
+This page uses the older audio monitoring context internally. It is
+functional for basic multi-channel scenarios but does not have the same
+level of tuning as Live Monitoring (no sustain duration, no hardware grace
+period, no session volume ramp). It is best suited for setups where you
+have physically separate audio sources for each call type.
+
+Activity logging in this page is local only — events appear in the on-screen
+log and can be exported to CSV, but they do not write to Firebase Realtime
+Database the way Live Monitoring does.
+
+
+================================================================================
+8.  OUTPUT & SPEAKERS  (Device Management)
+================================================================================
+
+This is where you configure the Algo hardware that AlgoSound talks to.
+Every device in the system — paging adapters, speakers, everything —
+lives here.
+
+ADDING A DEVICE:
+  - Name: anything descriptive.
+  - Type: pick the hardware model (8301 paging, 8180G2 speaker, 8198
+    ceiling speaker, etc.). The type matters because paging devices (8301)
+    get special treatment — they are the transmitters.
+  - IP Address: the device's address on the local network.
+  - Auth Method: Basic or Digest. Match what the device is configured for.
+  - API Password: the device's web interface password. Default is "algo"
+    for most Algo hardware out of the box.
+  - Zone: optional. Assign it to a zone for organized routing.
+
+NETWORK SCAN:
+  Enter a network range (e.g., 192.168.1.0/24) and hit Scan. The system
+  probes each IP in the range looking for Algo devices. Discovered devices
+  appear in a list — select the ones you want and add them in bulk. This
+  saves time on initial setup when you have a dozen devices to configure.
+
+HEALTH CHECKS:
+  The page runs a health check against every device every 60 seconds.
+  Online/offline status and last-seen timestamps are shown. If a device
+  fails auth, it shows up as offline with an auth error. Fix the password
+  in the edit form and it will recover on the next check.
+
+SPEAKER LINKING:
+  Paging devices (8301) have a "Linked Speakers" field. This is the list
+  of speakers that belong to that paging device. When Live Monitoring runs,
+  it reads this list to know which speakers to activate and deactivate.
+  If a speaker is not linked to any paging device, it will not be controlled
+  by Live Monitoring.
+
+TEST TONE:
+  Each device has a test button that sends a short tone to it. Use this to
+  verify connectivity and volume after adding or modifying a device.
+
+
+================================================================================
+9.  POE DEVICES
+================================================================================
+
+PoE Devices are non-audio devices powered by PoE switches — typically
+indicator lights or visual alerters in the station. They are controlled by
+toggling their PoE port on or off via the switch's management interface.
+
+SWITCHES:
+  First, add your PoE switch. Currently supports Netgear GS308EP and similar.
+  You need the switch's IP address and admin password.
+
+DEVICES:
+  Each PoE device is assigned to a specific port on a specific switch.
+  The key setting is the operation mode:
+
+  Always ON:  The port stays powered regardless of anything else.
+              Use this for devices that need to be on all the time.
+
+  Auto:       The port turns on when a linked paging device is active
+              (receiving a page) and turns off when it goes idle. This is
+              the normal mode for alert lights — they flash when a call
+              comes in and go dark when it's over.
+
+  Always OFF: The port stays unpowered. Useful for decommissioning a device
+              without physically disconnecting it.
+
+  For Auto mode, you link one or more paging devices to the PoE device.
+  When any of those paging devices fires, the light turns on.
+
+OPERATIONS:
+  - Test: toggles the port on and off once so you can verify which physical
+    light corresponds to which port.
+  - Sync: reads the current port state from the switch and updates the UI.
+  - Toggle: manually flips the port on/off.
+
+
+================================================================================
+10. ACTIVITY LOG
+================================================================================
+
+A date-filtered viewer for system events. Logs are stored in Firebase
+Realtime Database, keyed by user ID and date (PST).
+
+The log is intentionally sparse. It does not dump every internal debug
+message. It records nine categories of events:
+
+  - Voice detected
+  - Session started
+  - Session ended (silence timeout)
+  - Speakers activated
+  - Speakers deactivated
+  - Recording saved
+  - Uploading (filename)
+  - Monitoring started
+  - Monitoring stopped
+
+Each entry has a PST timestamp, an event type (color-coded), and a clean
+human-readable message.
+
+You can switch dates with the date picker (defaults to today in PST). Export
+to CSV is available for any day. Logs can be deleted by day.
+
+Admins can view other users' logs by switching the target user in the
+realtime sync context.
+
+Activity logging can be toggled on/off in Settings. When off, events still
+appear in the browser console via the local log state, but nothing writes
+to Firebase.
+
+
+================================================================================
+11. SETTINGS
+================================================================================
+
+ACCOUNT: Read-only display of your email and Firebase user ID.
+
+IDLE VOLUME LEVEL: The volume level that speakers are set to when they are
+  in the idle multicast group. This is not the same as "muted" — it is the
+  baseline volume the hardware sits at between calls. Range is -45dB to 0dB
+  in 3dB steps. Default is -45dB (Level -5). Changes take effect on the next
+  monitoring start.
+
+ACTIVITY LOGGING: Toggle whether key events write to Firebase Realtime
+  Database. The activity log page will be empty if this is off. Console
+  logging is unaffected.
+
+SAVE RECORDINGS: Toggle whether completed sessions are uploaded to Firebase
+  Storage. If off, recordings are captured in memory during the session but
+  discarded when the session ends. Metadata is not written to Firestore.
+
+
+================================================================================
+12. RECORDINGS
+================================================================================
+
+Admin-only page. Shows all recordings across all users, organized in a
+browsable hierarchy: User -> Date -> Individual Recordings.
+
+Each recording is a WebM/Opus file named with its PST timestamp:
+  recording-YYYY-MM-DD_HH-MM-SS-AM/PM.webm
+
+Controls:
+  - Search: filter by filename or user email.
+  - Filter by user and/or date.
+  - Sort by date, user, or file size.
+  - Play/pause inline.
+  - Download the file.
+  - Delete (removes from both Storage and Firestore).
+
+Pagination shows 10 items per page.
+
+Recording files are the concatenation of all batches in a session, with a
+single clean init segment prepended. Multi-batch sessions are combined at
+save time — you get one file per session, not one file per batch.
+
+
+================================================================================
+13. HARDWARE COMPATIBILITY
+================================================================================
+
+Tested and supported devices:
+
+  8301   – Paging Adapter (transmitter). This is the device that sends audio
+           to the multicast group. AlgoSound does NOT directly control this
+           device during Live Monitoring — it only reads its linked speaker
+           list. The paging device is never touched by emergency controls.
+
+  8180G2 – Wall/ceiling speaker (receiver). Controlled via mcast.zone1
+           setting. Switches between active and idle multicast groups.
+
+  8198   – Ceiling speaker (receiver). Same control mechanism as 8180G2.
+
+All speaker control goes through the mcast.zone1 setting on each device.
+Active group: 224.0.2.60:50002. Idle group: 224.0.2.60:50022.
+
+Auth methods: Basic and Digest are both supported. Set per-device in the
+device configuration. Most Algo hardware ships with Basic auth and a default
+password of "algo".
+
+
+================================================================================
+14. KNOWN BEHAVIORS & GOTCHAS
+================================================================================
+
+SUSTAIN DURATION AND THE FIRST FEW SECONDS OF AUDIO:
+  The sustain timer has to elapse before MediaRecorder starts. This means the
+  first N seconds of audio (where N = sustain duration) are NOT in the saved
+  recording. They ARE in the PCM playback, because the ring buffer captured
+  them before the trigger fired. So speakers hear the full call, but the
+  saved file is trimmed at the front. If complete recordings are critical,
+  keep sustain duration low (0-500ms).
+
+SILENCE TIMEOUT VS HARDWARE GRACE PERIOD:
+  These are two separate timers that run sequentially. Silence timeout ends
+  the session (stops recording). Grace period keeps speakers active for a
+  while after that. Total time from "last audio" to "speakers go idle" is
+  silence_timeout + grace_period. Default: 8s + 5s = 13 seconds.
+
+BACK-TO-BACK CALLS:
+  If new audio arrives while the grace period is still counting down,
+  speakers never go idle. The grace period timer is cancelled, hardware
+  stays in PLAYING state, and a new session starts. No warmup, no delay,
+  no clicks. This is by design — the grace period exists specifically to
+  handle this case.
+
+PLAYBACK DELAY AND WARMUP RUN IN PARALLEL:
+  When hardware activation starts, the playback delay timer starts at the
+  same time as the speaker warmup. By the time the delay is satisfied, the
+  warmup has already finished. You do not wait for both sequentially.
+
+EMULATION MODE AND REAL HARDWARE:
+  Emulation mode must be toggled before starting monitoring. If you start
+  monitoring with real devices selected and then try to switch to emulation,
+  you need to stop first. The two modes cannot coexist in the same session.
+
+RECORDINGS ARE KEYED BY SESSION ID:
+  If a save fails and retries, it will not create a duplicate recording in
+  Firestore. The session ID is used as the document ID, so retries are
+  idempotent.
+
+CONSOLE CLEAR ON NEW SESSION:
+  When a new audio session starts, the browser console is cleared.
+  Previous session logs are gone from the console. Activity log in Firebase
+  retains them if logging was enabled.
+
+IDLE VOLUME SETTING:
+  The idle volume in Settings is applied to speakers during hardware
+  initialization (when monitoring starts). It is not pushed in real time.
+  If you change it, restart monitoring for it to take effect.
+
+================================================================================
+                            END OF MANUAL
+================================================================================

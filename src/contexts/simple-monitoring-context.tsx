@@ -1,0 +1,1089 @@
+/**
+ * Simple Monitoring Context
+ *
+ * Provides state and config for SimpleRecorder-based live monitoring
+ */
+
+"use client";
+
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from "react";
+import { SimpleRecorder } from "@/lib/simple-recorder";
+import { useAuth } from "./auth-context";
+import { useRealtimeSync } from "./realtime-sync-context";
+import { ref as dbRef, push, set } from "firebase/database";
+import { realtimeDb, storage } from "@/lib/firebase/config";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { addRecording, getZones, getUserZoneRouting } from "@/lib/firebase/firestore";
+import type { Zone, ZoneRouting } from "@/lib/algo/types";
+
+// TODO: Import proper types
+type Device = any;
+type PoEDevice = any;
+
+interface SpeakerStatus {
+  speakerId: string;
+  isOnline: boolean;
+}
+
+interface SimpleMonitoringContextType {
+  // State
+  isMonitoring: boolean;
+  audioLevel: number;
+  playbackAudioLevel: number;
+  selectedInputDevice: string | null;
+  audioDetected: boolean;
+  speakersEnabled: boolean;
+
+  // Multi-Input Mode
+  multiInputMode: boolean;
+  medicalInputDevice: string | null;
+  fireInputDevice: string | null;
+  allCallInputDevice: string | null;
+  medicalAudioLevel: number;
+  fireAudioLevel: number;
+  allCallAudioLevel: number;
+  medicalEnabled: boolean;
+  fireEnabled: boolean;
+  allCallEnabled: boolean;
+
+  // Audio Settings
+  batchDuration: number;
+  silenceTimeout: number;
+  playbackDelay: number;
+  hardwareGracePeriod: number;
+  audioThreshold: number;
+  sustainDuration: number;
+  disableDelay: number;
+
+  // Volume & Ramp Settings
+  targetVolume: number;
+  rampEnabled: boolean;
+  rampDuration: number;
+  dayNightMode: boolean;
+  dayStartHour: number;
+  dayEndHour: number;
+  nightRampDuration: number;
+
+  // Playback Volume Settings
+  playbackRampDuration: number;
+  playbackStartVolume: number;
+  playbackMaxVolume: number;
+  playbackVolume: number;
+
+  // Playback Volume Ramping (Web Audio API - per session)
+  playbackRampEnabled: boolean;
+  playbackRampStartVolume: number;
+  playbackRampTargetVolume: number;
+  playbackSessionRampDuration: number;
+  playbackRampScheduleEnabled: boolean;
+  playbackRampStartHour: number;
+  playbackRampEndHour: number;
+
+  // Recording & Playback
+  saveRecording: boolean;
+  recordingEnabled: boolean;
+  loggingEnabled: boolean;
+  playbackEnabled: boolean;
+
+  // Devices
+  devices: Device[];
+  selectedDevices: string[];
+  poeDevices: PoEDevice[];
+  speakerStatuses: SpeakerStatus[];
+
+  // Zones (for zoned playback)
+  zones: Zone[];
+  zoneRouting: Record<string, ZoneRouting>;
+  zonedPlayback: boolean;
+  setZonedPlayback: (enabled: boolean) => void;
+
+  // Emulation
+  emulationMode: boolean;
+  emulationNetworkDelay: number;
+
+  // Actions
+  startMonitoring: () => Promise<void>;
+  stopMonitoring: () => Promise<void>;
+  setInputDevice: (deviceId: string) => void;
+
+  // Multi-Input Actions
+  setMultiInputMode: (enabled: boolean) => void;
+  setMedicalInputDevice: (deviceId: string | null) => void;
+  setFireInputDevice: (deviceId: string | null) => void;
+  setAllCallInputDevice: (deviceId: string | null) => void;
+  setMedicalEnabled: (enabled: boolean) => void;
+  setFireEnabled: (enabled: boolean) => void;
+  setAllCallEnabled: (enabled: boolean) => void;
+  setBatchDuration: (ms: number) => void;
+  setSilenceTimeout: (ms: number) => void;
+  setPlaybackDelay: (ms: number) => void;
+  setHardwareGracePeriod: (ms: number) => void;
+  setAudioThreshold: (value: number) => void;
+  setSustainDuration: (ms: number) => void;
+  setDisableDelay: (ms: number) => void;
+  setTargetVolume: (value: number) => void;
+  setRampEnabled: (enabled: boolean) => void;
+  setRampDuration: (ms: number) => void;
+  setDayNightMode: (enabled: boolean) => void;
+  setDayStartHour: (hour: number) => void;
+  setDayEndHour: (hour: number) => void;
+  setNightRampDuration: (ms: number) => void;
+  setPlaybackRampDuration: (ms: number) => void;
+  setPlaybackStartVolume: (value: number) => void;
+  setPlaybackMaxVolume: (value: number) => void;
+  setPlaybackVolume: (value: number) => void;
+  setPlaybackRampEnabled: (enabled: boolean) => void;
+  setPlaybackRampStartVolume: (value: number) => void;
+  setPlaybackRampTargetVolume: (value: number) => void;
+  setPlaybackSessionRampDuration: (ms: number) => void;
+  setPlaybackRampScheduleEnabled: (enabled: boolean) => void;
+  setPlaybackRampStartHour: (hour: number) => void;
+  setPlaybackRampEndHour: (hour: number) => void;
+  setSaveRecording: (enabled: boolean) => void;
+  setRecordingEnabled: (enabled: boolean) => void;
+  setLoggingEnabled: (enabled: boolean) => void;
+  setPlaybackEnabled: (enabled: boolean) => void;
+  setDevices: (devices: Device[]) => void;
+  setSelectedDevices: (deviceIds: string[]) => void;
+  setPoeDevices: (devices: PoEDevice[]) => void;
+  setEmulationMode: (enabled: boolean) => void;
+  setEmulationNetworkDelay: (ms: number) => void;
+  onAudioDetected: (level: number) => void;
+
+  // Emergency Controls (TODO: Implement)
+  emergencyKillAll: () => Promise<void>;
+  emergencyEnableAll: () => Promise<void>;
+  controlSingleSpeaker: (speakerId: string, enable: boolean) => Promise<void>;
+  checkSpeakerConnectivity: () => Promise<void>;
+  triggerTestCall: (durationSeconds: number) => void;
+
+  // Logs
+  logs: Array<{ timestamp: string; message: string; type: 'info' | 'error' | 'warning' }>;
+}
+
+const SimpleMonitoringContext = createContext<SimpleMonitoringContextType | null>(null);
+
+export function SimpleMonitoringProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const { syncSessionState, sessionState } = useRealtimeSync();
+
+  // State
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [playbackAudioLevel, setPlaybackAudioLevel] = useState(0);
+  const [selectedInputDevice, setSelectedInputDevice] = useState<string | null>(null);
+  const [audioDetected, setAudioDetected] = useState(false);
+  const [speakersEnabled, setSpeakersEnabled] = useState(false);
+
+  // Multi-Input Mode (ALWAYS ON - three inputs is the default)
+  const [multiInputMode, setMultiInputMode] = useState(true); // Default: TRUE
+  const [medicalInputDevice, setMedicalInputDevice] = useState<string | null>(null);
+  const [fireInputDevice, setFireInputDevice] = useState<string | null>(null);
+  const [allCallInputDevice, setAllCallInputDevice] = useState<string | null>(null);
+  const [medicalAudioLevel, setMedicalAudioLevel] = useState(0);
+  const [fireAudioLevel, setFireAudioLevel] = useState(0);
+  const [allCallAudioLevel, setAllCallAudioLevel] = useState(0);
+
+  // Enable/Disable per input
+  const [medicalEnabled, setMedicalEnabled] = useState(true);
+  const [fireEnabled, setFireEnabled] = useState(true);
+  const [allCallEnabled, setAllCallEnabled] = useState(true);
+
+  // Audio Settings
+  const [batchDuration, setBatchDuration] = useState(5000);
+  const [silenceTimeout, setSilenceTimeout] = useState(8000);
+  const [playbackDelay, setPlaybackDelay] = useState(4000);
+  const [hardwareGracePeriod, setHardwareGracePeriod] = useState(5000);
+  const [audioThreshold, setAudioThreshold] = useState(0);
+  const [sustainDuration, setSustainDuration] = useState(0);
+  const [disableDelay, setDisableDelay] = useState(8000);
+
+  // Volume & Ramp Settings
+  const [targetVolume, setTargetVolume] = useState(100);
+  const [rampEnabled, setRampEnabled] = useState(false);
+  const [rampDuration, setRampDuration] = useState(2000);
+  const [dayNightMode, setDayNightMode] = useState(false);
+  const [dayStartHour, setDayStartHour] = useState(7);
+  const [dayEndHour, setDayEndHour] = useState(19);
+  const [nightRampDuration, setNightRampDuration] = useState(3000);
+
+  // Playback Volume Settings
+  const [playbackRampDuration, setPlaybackRampDuration] = useState(0);
+  const [playbackStartVolume, setPlaybackStartVolume] = useState(0.5);
+  const [playbackMaxVolume, setPlaybackMaxVolume] = useState(1.0);
+  const [playbackVolume, setPlaybackVolume] = useState(1.0);
+
+  // Playback Volume Ramping (Web Audio API - per session)
+  const [playbackRampEnabled, setPlaybackRampEnabled] = useState(false);
+  const [playbackRampStartVolume, setPlaybackRampStartVolume] = useState(0);
+  const [playbackRampTargetVolume, setPlaybackRampTargetVolume] = useState(2.0);
+  const [playbackSessionRampDuration, setPlaybackSessionRampDuration] = useState(2000);
+  const [playbackRampScheduleEnabled, setPlaybackRampScheduleEnabled] = useState(false);
+  const [playbackRampStartHour, setPlaybackRampStartHour] = useState(18); // 6:00 PM
+  const [playbackRampEndHour, setPlaybackRampEndHour] = useState(6); // 6:00 AM
+
+  // Recording & Playback
+  const [saveRecording, setSaveRecording] = useState(true);
+  const [loggingEnabled, setLoggingEnabled] = useState(true);
+  const [playbackEnabled, setPlaybackEnabled] = useState(true);
+
+  // Devices
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+  const [poeDevices, setPoeDevices] = useState<PoEDevice[]>([]);
+  const [speakerStatuses, setSpeakerStatuses] = useState<SpeakerStatus[]>([]);
+
+  // Zones (for zoned playback)
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [zoneRouting, setZoneRouting] = useState<Record<string, ZoneRouting>>({});
+  const [zonedPlayback, setZonedPlayback] = useState(false);
+
+  // Emulation
+  const [emulationMode, setEmulationMode] = useState(false);
+  const [emulationNetworkDelay, setEmulationNetworkDelay] = useState(0);
+
+  // Logs
+  const [logs, setLogs] = useState<Array<{ timestamp: string; message: string; type: 'info' | 'error' | 'warning' }>>([]);
+
+  // Refs
+  const recorderRef = useRef<SimpleRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const linkedSpeakersRef = useRef<any[]>([]);
+
+  // Update recorder's playback volume when it changes
+  useEffect(() => {
+    if (recorderRef.current) {
+      recorderRef.current.setPlaybackVolume(playbackVolume);
+    }
+  }, [playbackVolume]);
+
+  // Load zones + zone routing from Firebase (user-scoped — only this user's zones)
+  useEffect(() => {
+    if (!user?.email) return;
+    Promise.all([
+      getZones(user.email),
+      getUserZoneRouting(user.email),
+    ]).then(([loadedZones, loadedRouting]) => {
+      setZones(loadedZones);
+      setZoneRouting(loadedRouting);
+    }).catch(() => {
+      // Non-fatal — zoned playback falls back to all speakers if zones fail to load
+    });
+  }, [user]);
+
+  // Auto-manage zonedPlayback based on day/night schedule
+  // When dayNightMode is on: night = zone routing, day = all speakers
+  // Runs every minute to catch schedule transitions mid-session
+  useEffect(() => {
+    if (!dayNightMode) return;
+
+    const checkSchedule = () => {
+      const now = new Date();
+      const currentTime = now.getHours() + (now.getMinutes() >= 30 ? 0.5 : 0);
+      const isDay = currentTime >= dayStartHour && currentTime < dayEndHour;
+      const shouldBeZoned = !isDay;
+
+      setZonedPlayback(shouldBeZoned);
+
+      // Update live recorder if monitoring is active — no restart needed
+      if (recorderRef.current) {
+        recorderRef.current.setZonedPlayback(shouldBeZoned);
+      }
+    };
+
+    checkSchedule(); // Apply immediately on mount or when schedule changes
+    const interval = setInterval(checkSchedule, 60_000); // Re-check every minute
+    return () => clearInterval(interval);
+  }, [dayNightMode, dayStartHour, dayEndHour]);
+
+  // Load settings from sessionState on mount
+  useEffect(() => {
+    if (!sessionState) return;
+
+    // Load device selection
+    if (sessionState.selectedDevices !== undefined) setSelectedDevices(sessionState.selectedDevices);
+    if (sessionState.selectedInputDevice !== undefined) setSelectedInputDevice(sessionState.selectedInputDevice);
+
+    // Load SimpleRecorder settings
+    if (sessionState.batchDuration !== undefined) setBatchDuration(sessionState.batchDuration);
+    if (sessionState.silenceTimeout !== undefined) setSilenceTimeout(sessionState.silenceTimeout);
+    if (sessionState.playbackDelay !== undefined) setPlaybackDelay(sessionState.playbackDelay);
+    if (sessionState.hardwareGracePeriod !== undefined) setHardwareGracePeriod(sessionState.hardwareGracePeriod);
+    if (sessionState.audioThreshold !== undefined) setAudioThreshold(sessionState.audioThreshold);
+    if (sessionState.sustainDuration !== undefined) setSustainDuration(sessionState.sustainDuration);
+    if (sessionState.disableDelay !== undefined) setDisableDelay(sessionState.disableDelay);
+
+    // Load volume settings
+    if (sessionState.targetVolume !== undefined) setTargetVolume(sessionState.targetVolume);
+    if (sessionState.rampEnabled !== undefined) setRampEnabled(sessionState.rampEnabled);
+    if (sessionState.rampDuration !== undefined) setRampDuration(sessionState.rampDuration);
+    if (sessionState.dayNightMode !== undefined) setDayNightMode(sessionState.dayNightMode);
+    if (sessionState.dayStartHour !== undefined) setDayStartHour(sessionState.dayStartHour);
+    if (sessionState.dayEndHour !== undefined) setDayEndHour(sessionState.dayEndHour);
+    if (sessionState.nightRampDuration !== undefined) setNightRampDuration(sessionState.nightRampDuration);
+
+    // Load playback volume settings
+    if (sessionState.playbackRampDuration !== undefined) setPlaybackRampDuration(sessionState.playbackRampDuration);
+    if (sessionState.playbackStartVolume !== undefined) setPlaybackStartVolume(sessionState.playbackStartVolume);
+    if (sessionState.playbackMaxVolume !== undefined) setPlaybackMaxVolume(sessionState.playbackMaxVolume);
+    if (sessionState.playbackVolume !== undefined) setPlaybackVolume(sessionState.playbackVolume);
+
+    // Load session volume ramping settings
+    if (sessionState.playbackRampEnabled !== undefined) setPlaybackRampEnabled(sessionState.playbackRampEnabled);
+    if (sessionState.playbackRampStartVolume !== undefined) setPlaybackRampStartVolume(sessionState.playbackRampStartVolume);
+    if (sessionState.playbackRampTargetVolume !== undefined) setPlaybackRampTargetVolume(sessionState.playbackRampTargetVolume);
+    if (sessionState.playbackSessionRampDuration !== undefined) setPlaybackSessionRampDuration(sessionState.playbackSessionRampDuration);
+    if (sessionState.playbackRampScheduleEnabled !== undefined) setPlaybackRampScheduleEnabled(sessionState.playbackRampScheduleEnabled);
+    if (sessionState.playbackRampStartHour !== undefined) setPlaybackRampStartHour(sessionState.playbackRampStartHour);
+    if (sessionState.playbackRampEndHour !== undefined) setPlaybackRampEndHour(sessionState.playbackRampEndHour);
+
+    // Load recording/playback settings
+    if (sessionState.saveRecording !== undefined) setSaveRecording(sessionState.saveRecording);
+    if (sessionState.loggingEnabled !== undefined) setLoggingEnabled(sessionState.loggingEnabled);
+    if (sessionState.playbackEnabled !== undefined) setPlaybackEnabled(sessionState.playbackEnabled);
+
+    // Load emulation settings
+    if (sessionState.emulationMode !== undefined) setEmulationMode(sessionState.emulationMode);
+    if (sessionState.emulationNetworkDelay !== undefined) setEmulationNetworkDelay(sessionState.emulationNetworkDelay);
+
+    // Load multi-input device selections
+    if (sessionState.medicalInputDevice !== undefined) setMedicalInputDevice(sessionState.medicalInputDevice);
+    if (sessionState.fireInputDevice !== undefined) setFireInputDevice(sessionState.fireInputDevice);
+    if (sessionState.allCallInputDevice !== undefined) setAllCallInputDevice(sessionState.allCallInputDevice);
+    if (sessionState.medicalEnabled !== undefined) setMedicalEnabled(sessionState.medicalEnabled);
+    if (sessionState.fireEnabled !== undefined) setFireEnabled(sessionState.fireEnabled);
+    if (sessionState.allCallEnabled !== undefined) setAllCallEnabled(sessionState.allCallEnabled);
+
+    // Load zone settings
+    if (sessionState.zonedPlayback !== undefined) setZonedPlayback(sessionState.zonedPlayback);
+  }, [sessionState]);
+
+  // Sync settings to RTDB when they change
+  useEffect(() => {
+    syncSessionState({
+      selectedDevices,
+      selectedInputDevice: selectedInputDevice || undefined,
+      batchDuration,
+      silenceTimeout,
+      playbackDelay,
+      hardwareGracePeriod,
+      audioThreshold,
+      sustainDuration,
+      disableDelay,
+      targetVolume,
+      rampEnabled,
+      rampDuration,
+      dayNightMode,
+      dayStartHour,
+      dayEndHour,
+      nightRampDuration,
+      playbackRampDuration,
+      playbackStartVolume,
+      playbackMaxVolume,
+      playbackVolume,
+      playbackRampEnabled,
+      playbackRampStartVolume,
+      playbackRampTargetVolume,
+      playbackSessionRampDuration,
+      playbackRampScheduleEnabled,
+      playbackRampStartHour,
+      playbackRampEndHour,
+      saveRecording,
+      loggingEnabled,
+      playbackEnabled,
+      emulationMode,
+      emulationNetworkDelay,
+      medicalInputDevice,
+      fireInputDevice,
+      allCallInputDevice,
+      medicalEnabled,
+      fireEnabled,
+      allCallEnabled,
+      zonedPlayback,
+    });
+  }, [
+    selectedDevices,
+    selectedInputDevice,
+    batchDuration, silenceTimeout, playbackDelay, hardwareGracePeriod, audioThreshold, sustainDuration, disableDelay,
+    targetVolume, rampEnabled, rampDuration, dayNightMode, dayStartHour, dayEndHour, nightRampDuration,
+    playbackRampDuration, playbackStartVolume, playbackMaxVolume, playbackVolume,
+    playbackRampEnabled, playbackRampStartVolume, playbackRampTargetVolume, playbackSessionRampDuration,
+    playbackRampScheduleEnabled, playbackRampStartHour, playbackRampEndHour,
+    saveRecording, loggingEnabled, playbackEnabled, emulationMode, emulationNetworkDelay,
+    medicalInputDevice, fireInputDevice, allCallInputDevice,
+    medicalEnabled, fireEnabled, allCallEnabled,
+    zonedPlayback,
+    syncSessionState,
+  ]);
+
+  // Start monitoring
+  const startMonitoring = useCallback(async () => {
+    try {
+      addLog(multiInputMode ? 'Starting multi-input monitoring...' : 'Starting monitoring...', 'info');
+
+      // Get microphone stream(s)
+      let stream: MediaStream | null = null;
+      let medicalStream: MediaStream | null = null;
+      let fireStream: MediaStream | null = null;
+      let allCallStream: MediaStream | null = null;
+
+      if (multiInputMode) {
+        // Get streams for ENABLED inputs only
+        const streamPromises: Promise<MediaStream | null>[] = [];
+
+        // Medical
+        if (medicalEnabled && medicalInputDevice) {
+          const medicalConstraints: MediaStreamConstraints = {
+            audio: { deviceId: { exact: medicalInputDevice } },
+            video: false,
+          };
+          streamPromises.push(navigator.mediaDevices.getUserMedia(medicalConstraints));
+        } else {
+          streamPromises.push(Promise.resolve(null));
+        }
+
+        // Fire
+        if (fireEnabled && fireInputDevice) {
+          const fireConstraints: MediaStreamConstraints = {
+            audio: { deviceId: { exact: fireInputDevice } },
+            video: false,
+          };
+          streamPromises.push(navigator.mediaDevices.getUserMedia(fireConstraints));
+        } else {
+          streamPromises.push(Promise.resolve(null));
+        }
+
+        // All-Call
+        if (allCallEnabled && allCallInputDevice) {
+          const allCallConstraints: MediaStreamConstraints = {
+            audio: { deviceId: { exact: allCallInputDevice } },
+            video: false,
+          };
+          streamPromises.push(navigator.mediaDevices.getUserMedia(allCallConstraints));
+        } else {
+          streamPromises.push(Promise.resolve(null));
+        }
+
+        [medicalStream, fireStream, allCallStream] = await Promise.all(streamPromises);
+
+        const enabledCount = [medicalStream, fireStream, allCallStream].filter(s => s !== null).length;
+        addLog(`✓ ${enabledCount} input stream(s) acquired`, 'info');
+
+        if (enabledCount === 0) {
+          throw new Error('At least one input must be enabled with a device selected');
+        }
+      } else {
+        // Single input mode
+        const constraints: MediaStreamConstraints = {
+          audio: selectedInputDevice
+            ? { deviceId: { exact: selectedInputDevice } }
+            : true,
+          video: false,
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        streamRef.current = stream;
+      }
+
+      // Get linked speakers and paging device
+      let linkedSpeakers: any[];
+      let pagingDevice: any;
+
+      if (emulationMode) {
+        // Create 12 virtual speakers + 1 paging device for emulation
+        linkedSpeakers = Array.from({ length: 12 }, (_, i) => ({
+          id: `virtual-speaker-${i + 1}`,
+          name: `Virtual Speaker ${i + 1}`,
+          ipAddress: `192.168.1.${100 + i}`,
+          type: '8180', // Speaker type
+          zone: i < 6 ? 'zone-a' : 'zone-b', // Split across 2 zones
+        }));
+
+        pagingDevice = {
+          id: 'virtual-paging-1',
+          name: 'Virtual Paging Device',
+          ipAddress: '192.168.1.200',
+          type: '8301', // Paging device type
+        };
+
+        addLog(`🧪 Emulation Mode: Created 12 virtual speakers + 1 paging device`, 'info');
+      } else {
+        // User must explicitly select a paging device — multiple paging devices may exist
+        // and only one should be active at a time. selectedDevices is the source of truth.
+        const selectedPagingDevices = devices.filter(d =>
+          selectedDevices.includes(d.id) && d.type === "8301"
+        );
+
+        if (selectedPagingDevices.length > 0) {
+          pagingDevice = selectedPagingDevices[0];
+          const linkedSpeakerIds = pagingDevice.linkedSpeakerIds || [];
+          linkedSpeakers = devices.filter(d => linkedSpeakerIds.includes(d.id));
+
+          addLog(`📢 Paging Device: ${pagingDevice.name}`, 'info');
+          addLog(`🔊 Linked Speakers: ${linkedSpeakers.length}`, 'info');
+          linkedSpeakers.forEach((s, i) => {
+            addLog(`   ${i + 1}. ${s.name} (${s.ipAddress})`, 'info');
+          });
+        } else {
+          pagingDevice = null;
+          linkedSpeakers = [];
+          addLog(`ℹ️  No paging device selected — hardware control inactive`, 'info');
+        }
+      }
+
+      // Store for emergency controls
+      linkedSpeakersRef.current = linkedSpeakers;
+
+      // Create SimpleRecorder
+      // Compute speakers-per-channel from zone routing (for zoned playback)
+      // For each channel, collect speakers that belong to zones routed to that channel
+      const allDevices = devices;
+      const computeSpeakersForChannel = (channel: 'medical' | 'fire' | 'allCall') => {
+        return allDevices.filter(device => {
+          if (!device.zone) return false;
+          const routing = zoneRouting[device.zone];
+          return routing ? routing[channel] === true : false;
+        });
+      };
+      const speakersByChannel = {
+        medical: computeSpeakersForChannel('medical'),
+        fire: computeSpeakersForChannel('fire'),
+        allCall: computeSpeakersForChannel('allCall'),
+      };
+
+      recorderRef.current = new SimpleRecorder({
+        multiInputMode,
+        batchDuration,
+        silenceTimeout,
+        playbackDelay,
+        hardwareGracePeriod,
+        audioThreshold,
+        sustainDuration,
+        linkedSpeakers,
+        pagingDevice,
+        saveRecording,
+        emulationMode,
+        emulationNetworkDelay,
+        playbackVolume,
+        playbackRampEnabled,
+        playbackRampStartVolume,
+        playbackRampTargetVolume,
+        playbackRampDuration: playbackSessionRampDuration,
+        playbackRampScheduleEnabled,
+        playbackRampStartHour,
+        playbackRampEndHour,
+        zonedPlayback,
+        speakersByChannel,
+        onMedicalAudioLevel: (level) => setMedicalAudioLevel(level),
+        onFireAudioLevel: (level) => setFireAudioLevel(level),
+        onAllCallAudioLevel: (level) => setAllCallAudioLevel(level),
+        uploadCallback: async (blob, filename, sessionId) => {
+          try {
+            addLog(`Uploading ${filename} (${(blob.size / 1024).toFixed(2)} KB)...`, 'info');
+
+            // Upload to Firebase Storage: recordings/{userId}/{filename}
+            const fileRef = storageRef(storage, `recordings/${user?.uid}/${filename}`);
+            await uploadBytes(fileRef, blob, {
+              contentType: 'audio/webm;codecs=opus', // Set proper MIME type
+            });
+
+            // Get download URL
+            const downloadURL = await getDownloadURL(fileRef);
+
+            // Log the download URL so user can access it
+            addLog(`✓ Upload complete: ${filename}`, 'info');
+            addLog(`🔗 Download: ${downloadURL}`, 'info');
+
+            // Save metadata to Firestore for fast querying
+            if (user) {
+              const { dateKey } = getPSTTime();
+
+              // Save to Firestore (for admin recordings page)
+              // Use sessionId as document ID to prevent duplicates on retry
+              await addRecording({
+                sessionId, // Use session ID as Firestore document ID
+                userId: user.uid,
+                userEmail: user.email || 'unknown',
+                filename,
+                storageUrl: downloadURL,
+                storagePath: `recordings/${user.uid}/${filename}`,
+                size: blob.size,
+                mimeType: 'audio/webm;codecs=opus',
+                timestamp: new Date(),
+                dateKey,
+              });
+
+              addLog('✓ Metadata saved to Firestore', 'info');
+            }
+
+            return downloadURL;
+          } catch (error) {
+            addLog(`❌ Upload failed: ${error}`, 'error');
+            console.error('[SimpleMonitoring] Upload error:', error);
+            throw error;
+          }
+        },
+        onLog: (message, type) => {
+          addLog(message, type);
+        },
+        onError: (error) => {
+          addLog(`Error: ${error.message}`, 'error');
+        },
+        onAudioLevel: (level) => {
+          setAudioLevel(level);
+          setAudioDetected(level > audioThreshold);
+        },
+        onPlaybackLevel: (level) => {
+          setPlaybackAudioLevel(level);
+        },
+        setSpeakerZoneIP: setSpeakersZoneIP,
+        setSpeakerVolume: async (speakerId: string, volumePercent: number) => {
+          // 🧪 EMULATION MODE: Skip API calls
+          if (emulationMode) {
+            addLog(`🧪 EMULATION: Skipping volume set for speaker ${speakerId}`, 'info');
+            return;
+          }
+
+          // Find speaker device
+          const speaker = devices.find(d => d.id === speakerId);
+          if (!speaker || !speaker.ipAddress || !speaker.apiPassword) {
+            addLog(`⚠️  Speaker ${speakerId} not found or missing credentials - skipping volume set`, 'warning');
+            return;
+          }
+
+          // Use speaker's maxVolume setting from /live-v2 page (NOT default volume from output page)
+          const speakerMaxVolume = speaker.maxVolume ?? 100;
+
+          // Convert to level (0-10) and then to dB
+          // Formula: dB = (level - 10) * 3
+          // Level 7 (70%) = -9dB, Level 10 (100%) = 0dB
+          let volumeDbString: string;
+          const volumeScale = Math.round((speakerMaxVolume / 100) * 10);
+          const volumeDb = (volumeScale - 10) * 3;
+          volumeDbString = volumeDb === 0 ? "0dB" : `${volumeDb}dB`;
+
+          try {
+            const response = await fetch("/api/algo/settings", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ipAddress: speaker.ipAddress,
+                password: speaker.apiPassword,
+                authMethod: speaker.authMethod || 'basic',
+                settings: {
+                  "audio.page.vol": volumeDbString,
+                },
+              }),
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: 'Unknown' }));
+              throw new Error(`${response.status}: ${errorData.error}`);
+            }
+
+            addLog(`✓ ${speaker.name} page volume set to ${volumeDbString} (level ${volumeScale})`, 'info');
+          } catch (error) {
+            // Don't throw - just log and continue with other speakers
+            addLog(`⚠️  ${speaker.name} volume failed: ${error}`, 'warning');
+          }
+        },
+      });
+
+      // Start recorder
+      if (multiInputMode) {
+        // At least one stream must be non-null (validated above)
+        await recorderRef.current.startMultiInput(medicalStream, fireStream, allCallStream);
+      } else if (stream) {
+        await recorderRef.current.start(stream);
+      } else {
+        throw new Error('No stream available');
+      }
+
+      // Initialize hardware (set to idle + individual volumes)
+      addLog('Initializing hardware...', 'info');
+      await recorderRef.current.initializeHardware();
+
+      setIsMonitoring(true);
+      addLog('✅ Monitoring started', 'info');
+
+    } catch (error) {
+      addLog(`Failed to start: ${error}`, 'error');
+      console.error('Failed to start monitoring:', error);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInputDevice, batchDuration, silenceTimeout, playbackDelay, hardwareGracePeriod, saveRecording, devices, selectedDevices, audioThreshold, emulationMode, emulationNetworkDelay]);
+
+  // Stop monitoring
+  const stopMonitoring = useCallback(async () => {
+    try {
+      addLog('Stopping monitoring...', 'info');
+
+      if (recorderRef.current) {
+        await recorderRef.current.stop();
+        recorderRef.current = null;
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+
+      linkedSpeakersRef.current = [];
+      setIsMonitoring(false);
+      addLog('✅ Monitoring stopped', 'info');
+
+    } catch (error) {
+      addLog(`Failed to stop: ${error}`, 'error');
+      console.error('Failed to stop monitoring:', error);
+    }
+  }, []);
+
+  // Audio level callback
+  const onAudioDetected = useCallback((level: number) => {
+    setAudioLevel(level);
+
+    // Update audio detected state
+    setAudioDetected(level > audioThreshold);
+
+    if (recorderRef.current) {
+      recorderRef.current.onAudioDetected(level);
+    }
+  }, [audioThreshold]);
+
+  // Set input device
+  const setInputDevice = useCallback((deviceId: string) => {
+    setSelectedInputDevice(deviceId);
+  }, []);
+
+  // Helper to get PST time
+  const getPSTTime = () => {
+    const now = new Date();
+
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Los_Angeles',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+
+    const parts = formatter.formatToParts(now);
+    const year = parts.find(p => p.type === 'year')?.value || '';
+    const month = parts.find(p => p.type === 'month')?.value || '';
+    const day = parts.find(p => p.type === 'day')?.value || '';
+    const hour = parts.find(p => p.type === 'hour')?.value || '';
+    const minute = parts.find(p => p.type === 'minute')?.value || '';
+    const second = parts.find(p => p.type === 'second')?.value || '';
+
+    const timestamp = `${hour}:${minute}:${second}`;
+    const dateKey = `${year}-${month}-${day}`;
+
+    return { timestamp, dateKey };
+  };
+
+  // Add log (write to Firebase RTDB for activity page)
+  const addLog = useCallback((message: string, type: 'info' | 'error' | 'warning') => {
+    const { timestamp, dateKey } = getPSTTime();
+    const logEntry = { timestamp, message, type };
+
+    // Add to local state (for console/debugging)
+    setLogs(prev => [...prev.slice(-99), logEntry]); // Keep last 100
+
+    // Only persist key state-change events to Firebase — everything else is console-only
+    if (!user || !loggingEnabled) return;
+
+    let eventType: string | null = null;
+    let cleanMessage = message;
+
+    if (message.includes('VOICE DETECTED')) {
+      eventType = 'audio_detected';
+      cleanMessage = 'Voice detected';
+    } else if (message.includes('NEW SESSION CREATED')) {
+      eventType = 'system';
+      cleanMessage = 'Session started';
+    } else if (message.includes('SESSION CLOSED')) {
+      eventType = 'audio_silent';
+      cleanMessage = 'Session ended (silence timeout)';
+    } else if (message.includes('HARDWARE ACTIVATION COMPLETE')) {
+      eventType = 'speakers_enabled';
+      cleanMessage = 'Speakers activated';
+    } else if (message.includes('HARDWARE DEACTIVATION COMPLETE')) {
+      eventType = 'speakers_disabled';
+      cleanMessage = 'Speakers deactivated';
+    } else if (message.includes('SAVE COMPLETE')) {
+      eventType = 'system';
+      cleanMessage = 'Recording saved';
+    } else if (message.includes('Uploading:')) {
+      eventType = 'system';
+      const match = message.match(/Uploading: (.+)/);
+      cleanMessage = match ? `Uploading ${match[1]}` : 'Uploading recording';
+    } else if (message.includes('Monitoring started')) {
+      eventType = 'system';
+      cleanMessage = 'Monitoring started';
+    } else if (message.includes('Monitoring stopped')) {
+      eventType = 'system';
+      cleanMessage = 'Monitoring stopped';
+    }
+
+    if (!eventType) return; // Not a key event — skip Firebase write
+
+    const logRef = dbRef(realtimeDb, `logs/${user.uid}/${dateKey}`);
+    const newLogRef = push(logRef);
+    set(newLogRef, {
+      timestamp,
+      type: eventType,
+      message: cleanMessage,
+    }).catch((error) => {
+      console.error('[SimpleMonitoring] Failed to write log to Firebase:', error);
+    });
+  }, [user, loggingEnabled]);
+
+  // Set zone IP on a list of speakers (shared by SimpleRecorder and emergency controls)
+  const setSpeakersZoneIP = useCallback(async (speakers: any[], zoneIP: string) => {
+    if (speakers.length === 0) {
+      addLog(`⚠️  No speakers to control`, 'warning');
+      return;
+    }
+
+    if (emulationMode) {
+      const mode = zoneIP.includes(':50002') ? 'ACTIVE' : 'IDLE';
+      addLog(`🧪 EMULATION: Skipping API call for ${speakers.length} speakers' mcast.zone1 → ${zoneIP} (${mode})`, 'info');
+      return;
+    }
+
+    const mode = zoneIP.includes(':50002') ? 'ACTIVE' : 'IDLE';
+    addLog(`Setting ${speakers.length} speakers' mcast.zone1 to ${zoneIP} (${mode}) - in parallel`, 'info');
+
+    try {
+      const results = await Promise.allSettled(
+        speakers.map(async (speaker) => {
+          const response = await fetch("/api/algo/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ipAddress: speaker.ipAddress,
+              password: speaker.apiPassword || speaker.password,
+              authMethod: speaker.authMethod || 'basic',
+              settings: {
+                "mcast.zone1": zoneIP,
+              },
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`${speaker.name}: API returned ${response.status}`);
+          }
+
+          return { speaker: speaker.name, success: true };
+        })
+      );
+
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const failCount = speakers.length - successCount;
+
+      if (failCount > 0) {
+        addLog(`⚠️  ${successCount}/${speakers.length} speakers updated (${failCount} failed)`, 'warning');
+      } else {
+        addLog(`✓ All ${speakers.length} speakers' zone IP set to ${zoneIP}`, 'info');
+      }
+    } catch (error) {
+      addLog(`❌ Failed to set speaker zone IP: ${error}`, 'error');
+      throw error;
+    }
+  }, [emulationMode, addLog]);
+
+  // Emergency Controls — speakers only, never paging device
+  const emergencyKillAll = useCallback(async () => {
+    const speakers = linkedSpeakersRef.current;
+    if (speakers.length === 0) {
+      addLog('🚨 No linked speakers to mute', 'warning');
+      return;
+    }
+    addLog(`🚨 EMERGENCY: Muting all ${speakers.length} speakers (idle zone)...`, 'warning');
+    await setSpeakersZoneIP(speakers, '224.0.2.60:50022');
+  }, [setSpeakersZoneIP, addLog]);
+
+  const emergencyEnableAll = useCallback(async () => {
+    const speakers = linkedSpeakersRef.current;
+    if (speakers.length === 0) {
+      addLog('⚠️  No linked speakers to enable', 'warning');
+      return;
+    }
+    addLog(`✅ EMERGENCY: Enabling all ${speakers.length} speakers (active receiver zone)...`, 'info');
+    await setSpeakersZoneIP(speakers, '224.0.2.60:50002');
+  }, [setSpeakersZoneIP, addLog]);
+
+  const controlSingleSpeaker = useCallback(async (speakerId: string, enable: boolean) => {
+    const speakers = linkedSpeakersRef.current;
+    const speaker = speakers.find((s: any) => s.id === speakerId);
+    if (!speaker) {
+      addLog(`⚠️  Speaker ${speakerId} not found in linked speakers`, 'warning');
+      return;
+    }
+    const action = enable ? 'Enabling' : 'Muting';
+    addLog(`${action} speaker ${speaker.name}...`, 'info');
+    await setSpeakersZoneIP([speaker], enable ? '224.0.2.60:50002' : '224.0.2.60:50022');
+  }, [setSpeakersZoneIP, addLog]);
+
+  const checkSpeakerConnectivity = useCallback(async () => {
+    addLog('Checking speaker connectivity (not implemented yet)', 'warning');
+  }, []);
+
+  const triggerTestCall = useCallback((durationSeconds: number) => {
+    addLog(`Triggering test call for ${durationSeconds}s (not implemented yet)`, 'warning');
+  }, []);
+
+  const value: SimpleMonitoringContextType = {
+    // State
+    isMonitoring,
+    audioLevel,
+    playbackAudioLevel,
+    selectedInputDevice,
+    audioDetected,
+    speakersEnabled,
+
+    // Multi-Input Mode
+    multiInputMode,
+    medicalInputDevice,
+    fireInputDevice,
+    allCallInputDevice,
+    medicalAudioLevel,
+    fireAudioLevel,
+    allCallAudioLevel,
+    medicalEnabled,
+    fireEnabled,
+    allCallEnabled,
+
+    // Audio Settings
+    batchDuration,
+    silenceTimeout,
+    playbackDelay,
+    hardwareGracePeriod,
+    audioThreshold,
+    sustainDuration,
+    disableDelay,
+
+    // Volume & Ramp Settings
+    targetVolume,
+    rampEnabled,
+    rampDuration,
+    dayNightMode,
+    dayStartHour,
+    dayEndHour,
+    nightRampDuration,
+
+    // Playback Volume Settings
+    playbackRampDuration,
+    playbackStartVolume,
+    playbackMaxVolume,
+    playbackVolume,
+
+    // Playback Volume Ramping (Web Audio API - per session)
+    playbackRampEnabled,
+    playbackRampStartVolume,
+    playbackRampTargetVolume,
+    playbackSessionRampDuration,
+    playbackRampScheduleEnabled,
+    playbackRampStartHour,
+    playbackRampEndHour,
+
+    // Recording & Playback
+    saveRecording,
+    recordingEnabled: saveRecording, // Alias
+    loggingEnabled,
+    playbackEnabled,
+
+    // Devices
+    devices,
+    selectedDevices,
+    poeDevices,
+    speakerStatuses,
+
+    // Zones (for zoned playback)
+    zones,
+    zoneRouting,
+    zonedPlayback,
+    setZonedPlayback,
+
+    // Emulation
+    emulationMode,
+    emulationNetworkDelay,
+
+    // Actions
+    startMonitoring,
+    stopMonitoring,
+    setInputDevice,
+
+    // Multi-Input Actions
+    setMultiInputMode,
+    setMedicalInputDevice,
+    setFireInputDevice,
+    setAllCallInputDevice,
+    setMedicalEnabled,
+    setFireEnabled,
+    setAllCallEnabled,
+
+    setBatchDuration,
+    setSilenceTimeout,
+    setPlaybackDelay,
+    setHardwareGracePeriod,
+    setAudioThreshold,
+    setSustainDuration,
+    setDisableDelay,
+    setTargetVolume,
+    setRampEnabled,
+    setRampDuration,
+    setDayNightMode,
+    setDayStartHour,
+    setDayEndHour,
+    setNightRampDuration,
+    setPlaybackRampDuration,
+    setPlaybackStartVolume,
+    setPlaybackMaxVolume,
+    setPlaybackVolume,
+    setPlaybackRampEnabled,
+    setPlaybackRampStartVolume,
+    setPlaybackRampTargetVolume,
+    setPlaybackSessionRampDuration,
+    setPlaybackRampScheduleEnabled,
+    setPlaybackRampStartHour,
+    setPlaybackRampEndHour,
+    setSaveRecording,
+    setRecordingEnabled: setSaveRecording, // Alias
+    setLoggingEnabled,
+    setPlaybackEnabled,
+    setDevices,
+    setSelectedDevices,
+    setPoeDevices,
+    setEmulationMode,
+    setEmulationNetworkDelay,
+    onAudioDetected,
+
+    // Emergency Controls
+    emergencyKillAll,
+    emergencyEnableAll,
+    controlSingleSpeaker,
+    checkSpeakerConnectivity,
+    triggerTestCall,
+
+    // Logs
+    logs,
+  };
+
+  return (
+    <SimpleMonitoringContext.Provider value={value}>
+      {children}
+    </SimpleMonitoringContext.Provider>
+  );
+}
+
+export function useSimpleMonitoring() {
+  const context = useContext(SimpleMonitoringContext);
+  if (!context) {
+    throw new Error('useSimpleMonitoring must be used within SimpleMonitoringProvider');
+  }
+  return context;
+}

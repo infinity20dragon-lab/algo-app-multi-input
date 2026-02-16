@@ -1,0 +1,55 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Devices collection
+    match /devices/{deviceId} {
+      // Allow read and write access to authenticated users
+      allow read, write: if isAuthenticated();
+    }
+
+    // Zones collection
+    match /zones/{zoneId} {
+      // Allow read and write access to authenticated users
+      allow read, write: if isAuthenticated();
+    }
+
+    // Zone Routing collection
+    match /zoneRouting/{zoneId} {
+      // Allow read and write access to authenticated users
+      allow read, write: if isAuthenticated();
+    }
+
+    // Audio Files collection
+    match /audioFiles/{audioFileId} {
+      // Allow read and write access to authenticated users
+      allow read, write: if isAuthenticated();
+    }
+
+    // Distribution Logs collection
+    match /distributionLogs/{logId} {
+      // Allow read access to authenticated users
+      // Allow write access to authenticated users (for creating new logs)
+      allow read, write: if isAuthenticated();
+    }
+
+    // Users collection - CRITICAL for login!
+    match /users/{userId} {
+      // Allow users to read/write their own profile
+      // Allow admins to read all user profiles
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // PoE Devices collection
+    match /poeDevices/{deviceId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

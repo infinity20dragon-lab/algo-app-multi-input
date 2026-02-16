@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+:root {
+  /* Background Colors */
+  --bg-primary: #0a0e14;
+  --bg-secondary: #111820;
+  --bg-tertiary: #1a2332;
+  --bg-card: #141c28;
+
+  /* Border Colors */
+  --border-color: #243044;
+  --border-active: #3d5a80;
+
+  /* Text Colors */
+  --text-primary: #e8edf4;
+  --text-secondary: #8899ab;
+  --text-muted: #5c6f82;
+
+  /* Accent Colors */
+  --accent-blue: #4a9eff;
+  --accent-red: #ff5c5c;
+  --accent-orange: #ffaa4a;
+  --accent-green: #4aff9f;
+  --accent-purple: #a855f7;
+
+  /* Zone Colors */
+  --zone-dorm: #6366f1;
+  --zone-common: #22c55e;
+  --zone-apparatus: #f59e0b;
+  --zone-office: #ec4899;
+  --zone-kitchen: #14b8a6;
+
+  /* Legacy compatibility */
+  --background: var(--bg-primary);
+  --foreground: var(--text-primary);
+}
+
+@theme inline {
+  /* Map CSS variables to Tailwind colors */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Background utilities */
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-bg-card: var(--bg-card);
+
+  /* Border utilities */
+  --color-border: var(--border-color);
+  --color-border-active: var(--border-active);
+
+  /* Text utilities */
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  /* Accent utilities */
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-red: var(--accent-red);
+  --color-accent-orange: var(--accent-orange);
+  --color-accent-green: var(--accent-green);
+  --color-accent-purple: var(--accent-purple);
+
+  /* Zone utilities */
+  --color-zone-dorm: var(--zone-dorm);
+  --color-zone-common: var(--zone-common);
+  --color-zone-apparatus: var(--zone-apparatus);
+  --color-zone-office: var(--zone-office);
+  --color-zone-kitchen: var(--zone-kitchen);
+
+  /* Fonts */
+  --font-sans: var(--font-plus-jakarta), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-active);
+}
+
+/* Gradient utilities - can be used with arbitrary values */
+.gradient-fire {
+  background: linear-gradient(135deg, #ff5c5c 0%, #ff8c4a 100%);
+}
+
+.gradient-medical {
+  background: linear-gradient(135deg, #4a9eff 0%, #4affea 100%);
+}
+
+.gradient-all {
+  background: linear-gradient(135deg, #a855f7 0%, #ff5caa 100%);
+}
+
+/* Animation keyframes */
+@keyframes pulse-alert {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 92, 92, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px rgba(255, 92, 92, 0.2);
+  }
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.animate-pulse-alert {
+  animation: pulse-alert 2s infinite;
+}
+
+.animate-blink {
+  animation: blink 1s infinite;
+}

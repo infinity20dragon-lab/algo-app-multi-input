@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlgoSound - Fire Station Alerting System</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e14;
+            --bg-secondary: #111820;
+            --bg-tertiary: #1a2332;
+            --bg-card: #141c28;
+            --border-color: #243044;
+            --border-active: #3d5a80;
+            --text-primary: #e8edf4;
+            --text-secondary: #8899ab;
+            --text-muted: #5c6f82;
+            --accent-blue: #4a9eff;
+            --accent-red: #ff5c5c;
+            --accent-orange: #ffaa4a;
+            --accent-green: #4aff9f;
+            --accent-purple: #a855f7;
+            --zone-dorm: #6366f1;
+            --zone-common: #22c55e;
+            --zone-apparatus: #f59e0b;
+            --zone-office: #ec4899;
+            --zone-kitchen: #14b8a6;
+            --gradient-fire: linear-gradient(135deg, #ff5c5c 0%, #ff8c4a 100%);
+            --gradient-medical: linear-gradient(135deg, #4a9eff 0%, #4affea 100%);
+            --gradient-all: linear-gradient(135deg, #a855f7 0%, #ff5caa 100%);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        .app-container { display: flex; min-height: 100vh; }
+        
+        /* Sidebar */
+        .sidebar { width: 260px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; position: fixed; height: 100vh; z-index: 100; }
+        .logo { padding: 24px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: var(--gradient-fire); border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .logo-icon svg { width: 24px; height: 24px; stroke: white; }
+        .logo-text { font-size: 20px; font-weight: 700; }
+        .logo-text span { color: var(--accent-orange); }
+        .nav-section { padding: 16px 12px; flex: 1; overflow-y: auto; }
+        .nav-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); padding: 8px 12px; margin-top: 8px; }
+        .nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s; color: var(--text-secondary); margin-bottom: 2px; }
+        .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .nav-item.active { background: linear-gradient(135deg, rgba(74, 158, 255, 0.15) 0%, rgba(74, 255, 234, 0.08) 100%); color: var(--accent-blue); border: 1px solid rgba(74, 158, 255, 0.3); }
+        .nav-item svg { width: 20px; height: 20px; stroke-width: 1.5; }
+        .nav-item span { font-size: 14px; font-weight: 500; }
+        .alert-status { margin: 16px 12px; padding: 16px; background: var(--bg-tertiary); border-radius: 12px; border: 1px solid var(--border-color); }
+        .alert-status.active-alert { background: linear-gradient(135deg, rgba(255, 92, 92, 0.15) 0%, rgba(255, 140, 74, 0.08) 100%); border-color: rgba(255, 92, 92, 0.4); animation: pulse-alert 2s infinite; }
+        @keyframes pulse-alert { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 92, 92, 0.4); } 50% { box-shadow: 0 0 20px 4px rgba(255, 92, 92, 0.2); } }
+        .alert-status-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
+        .alert-status-value { font-size: 14px; font-weight: 600; color: var(--accent-green); display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); }
+        .alert-status.active-alert .alert-status-value { color: var(--accent-red); }
+        .alert-status.active-alert .status-dot { background: var(--accent-red); animation: blink 1s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .user-section { padding: 16px; border-top: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
+        .user-avatar { width: 36px; height: 36px; border-radius: 8px; background: var(--gradient-medical); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+        .user-info { flex: 1; }
+        .user-name { font-size: 14px; font-weight: 600; }
+        .user-role { font-size: 12px; color: var(--text-muted); }
+        
+        /* Main Content */
+        .main-content { flex: 1; margin-left: 260px; display: flex; flex-direction: column; }
+        .header { padding: 20px 32px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; background: var(--bg-secondary); position: sticky; top: 0; z-index: 50; }
+        .header-title h1 { font-size: 24px; font-weight: 700; }
+        .header-title p { font-size: 14px; color: var(--text-secondary); margin-top: 4px; }
+        .header-actions { display: flex; gap: 12px; }
+        .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; font-family: inherit; }
+        .btn svg { width: 18px; height: 18px; }
+        .btn-primary { background: var(--accent-blue); color: white; }
+        .btn-primary:hover { background: #3d8ae6; transform: translateY(-1px); }
+        .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { background: var(--bg-card); border-color: var(--border-active); }
+        .content { flex: 1; padding: 32px; overflow-y: auto; }
+        .page-section { display: none; }
+        .page-section.active { display: block; }
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; }
+        .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .card-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .card-title svg { width: 20px; height: 20px; stroke: var(--accent-blue); }
+        
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; }
+        .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+        .stat-icon svg { width: 20px; height: 20px; }
+        .stat-icon.blue { background: rgba(74, 158, 255, 0.15); }
+        .stat-icon.blue svg { stroke: var(--accent-blue); }
+        .stat-icon.green { background: rgba(74, 255, 159, 0.15); }
+        .stat-icon.green svg { stroke: var(--accent-green); }
+        .stat-icon.orange { background: rgba(255, 170, 74, 0.15); }
+        .stat-icon.orange svg { stroke: var(--accent-orange); }
+        .stat-icon.purple { background: rgba(168, 85, 247, 0.15); }
+        .stat-icon.purple svg { stroke: var(--accent-purple); }
+        .stat-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+        .stat-label { font-size: 13px; color: var(--text-secondary); }
+        
+        /* Test Alert */
+        .test-alert-panel { background: linear-gradient(135deg, rgba(255, 170, 74, 0.1) 0%, rgba(255, 92, 92, 0.05) 100%); border: 1px solid rgba(255, 170, 74, 0.3); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .test-alert-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .test-alert-icon { width: 44px; height: 44px; border-radius: 10px; background: var(--gradient-fire); display: flex; align-items: center; justify-content: center; }
+        .test-alert-icon svg { width: 22px; height: 22px; stroke: white; }
+        .test-alert-title { font-size: 16px; font-weight: 600; }
+        .test-alert-subtitle { font-size: 13px; color: var(--text-secondary); }
+        .test-alert-buttons { display: flex; gap: 12px; }
+        .test-btn { flex: 1; padding: 14px; border-radius: 10px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; font-family: inherit; color: white; }
+        .test-btn svg { width: 18px; height: 18px; }
+        .test-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3); }
+        .test-btn.fire { background: var(--gradient-fire); }
+        .test-btn.medical { background: var(--gradient-medical); }
+        .test-btn.all { background: var(--gradient-all); }
+        
+        /* Floor Plan */
+        .floor-plan-container { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .floor-plan { position: relative; width: 100%; height: 500px; background: var(--bg-tertiary); border-radius: 12px; border: 2px dashed var(--border-color); overflow: hidden; }
+        .floor-plan-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(74, 158, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(74, 158, 255, 0.03) 1px, transparent 1px); background-size: 40px 40px; }
+        .zone { position: absolute; border-radius: 12px; cursor: pointer; transition: all 0.3s; display: flex; flex-direction: column; padding: 16px; border: 2px solid transparent; }
+        .zone:hover { transform: scale(1.02); z-index: 10; }
+        .zone.selected { border-color: var(--accent-blue); box-shadow: 0 0 30px rgba(74, 158, 255, 0.3); }
+        .zone.alerting { animation: zone-alert 1s infinite; }
+        @keyframes zone-alert { 0%, 100% { box-shadow: 0 0 20px rgba(255, 92, 92, 0.5); } 50% { box-shadow: 0 0 40px rgba(255, 92, 92, 0.8); } }
+        .zone-dorm-1 { top: 20px; left: 20px; width: 200px; height: 180px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.1) 100%); border-color: rgba(99, 102, 241, 0.3); }
+        .zone-dorm-2 { top: 20px; left: 240px; width: 200px; height: 180px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.1) 100%); border-color: rgba(99, 102, 241, 0.3); }
+        .zone-common { top: 220px; left: 20px; width: 420px; height: 130px; background: linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.1) 100%); border-color: rgba(34, 197, 94, 0.3); }
+        .zone-apparatus { top: 20px; right: 20px; width: 300px; height: 330px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(245, 158, 11, 0.1) 100%); border-color: rgba(245, 158, 11, 0.3); }
+        .zone-office { bottom: 20px; left: 20px; width: 200px; height: 120px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.2) 0%, rgba(236, 72, 153, 0.1) 100%); border-color: rgba(236, 72, 153, 0.3); }
+        .zone-kitchen { bottom: 20px; left: 240px; width: 200px; height: 120px; background: linear-gradient(135deg, rgba(20, 184, 166, 0.2) 0%, rgba(20, 184, 166, 0.1) 100%); border-color: rgba(20, 184, 166, 0.3); }
+        .zone-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .zone-name { font-size: 14px; font-weight: 600; }
+        .zone-badge { font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); }
+        .zone-call-types { display: flex; gap: 6px; margin-top: 8px; }
+        .call-type-indicator { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; opacity: 0.3; }
+        .call-type-indicator.active { opacity: 1; }
+        .call-type-fire { background: var(--gradient-fire); color: white; }
+        .call-type-medical { background: var(--gradient-medical); color: white; }
+        .call-type-all { background: var(--gradient-all); color: white; }
+        .zone-speakers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+        .speaker-icon { width: 32px; height: 32px; border-radius: 8px; background: rgba(255, 255, 255, 0.1); display: flex; align-items: center; justify-content: center; position: relative; }
+        .speaker-icon svg { width: 16px; height: 16px; stroke: var(--text-secondary); }
+        .speaker-icon.online svg { stroke: var(--accent-green); }
+        .speaker-status-dot { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--bg-card); }
+        .speaker-status-dot.online { background: var(--accent-green); }
+        .speaker-status-dot.offline { background: var(--accent-red); }
+        
+        /* Audio Panel */
+        .audio-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .audio-device-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); }
+        .device-icon-large { width: 56px; height: 56px; border-radius: 12px; background: var(--gradient-fire); display: flex; align-items: center; justify-content: center; }
+        .device-icon-large svg { width: 28px; height: 28px; stroke: white; }
+        .device-info h3 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+        .device-info p { font-size: 13px; color: var(--text-secondary); }
+        .device-status { margin-left: auto; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(74, 255, 159, 0.1); border-radius: 8px; border: 1px solid rgba(74, 255, 159, 0.3); }
+        .device-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); }
+        .device-status span { font-size: 13px; font-weight: 600; color: var(--accent-green); }
+        
+        /* VU Meter */
+        .vu-meter-container { margin-bottom: 24px; }
+        .vu-meter-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+        .vu-meter { height: 40px; background: var(--bg-tertiary); border-radius: 8px; overflow: hidden; display: flex; gap: 2px; padding: 6px; }
+        .vu-bar { flex: 1; background: var(--border-color); border-radius: 4px; transition: background 0.05s; }
+        .vu-bar.active { background: var(--accent-green); }
+        .vu-bar.active.yellow { background: var(--accent-orange); }
+        .vu-bar.active.red { background: var(--accent-red); }
+        .vu-meter-db { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+        
+        /* Tone Detection */
+        .tone-detection { background: var(--bg-tertiary); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .tone-detection-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .tone-detection-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .tone-detection-title svg { width: 18px; height: 18px; stroke: var(--accent-purple); }
+        .detection-status { font-size: 12px; padding: 4px 10px; border-radius: 6px; font-weight: 600; }
+        .detection-status.listening { background: rgba(74, 158, 255, 0.15); color: var(--accent-blue); }
+        .detection-status.detected { background: rgba(74, 255, 159, 0.15); color: var(--accent-green); animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .tone-categories { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .tone-category { padding: 16px; border-radius: 10px; text-align: center; border: 2px solid transparent; transition: all 0.3s; cursor: pointer; }
+        .tone-category.fire { background: rgba(255, 92, 92, 0.1); border-color: rgba(255, 92, 92, 0.2); }
+        .tone-category.medical { background: rgba(74, 158, 255, 0.1); border-color: rgba(74, 158, 255, 0.2); }
+        .tone-category.all-call { background: rgba(168, 85, 247, 0.1); border-color: rgba(168, 85, 247, 0.2); }
+        .tone-category.detected { transform: scale(1.05); }
+        .tone-category.detected.fire { border-color: var(--accent-red); box-shadow: 0 0 20px rgba(255, 92, 92, 0.4); }
+        .tone-category-icon { width: 40px; height: 40px; border-radius: 10px; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; }
+        .tone-category.fire .tone-category-icon { background: var(--gradient-fire); }
+        .tone-category.medical .tone-category-icon { background: var(--gradient-medical); }
+        .tone-category.all-call .tone-category-icon { background: var(--gradient-all); }
+        .tone-category-icon svg { width: 20px; height: 20px; stroke: white; }
+        .tone-category-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .tone-category-last { font-size: 11px; color: var(--text-muted); }
+        
+        /* Controls */
+        .controls-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .control-group { background: var(--bg-tertiary); border-radius: 10px; padding: 16px; }
+        .control-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; display: block; }
+        .slider-container { position: relative; padding-top: 24px; }
+        .slider { width: 100%; height: 8px; border-radius: 4px; background: var(--border-color); appearance: none; cursor: pointer; }
+        .slider::-webkit-slider-thumb { appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-blue); cursor: pointer; box-shadow: 0 2px 8px rgba(74, 158, 255, 0.4); }
+        .slider-value { position: absolute; right: 0; top: 0; font-size: 14px; font-weight: 600; font-family: 'JetBrains Mono', monospace; color: var(--accent-blue); }
+        .select-wrapper { position: relative; }
+        .select { width: 100%; padding: 10px 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 13px; font-family: inherit; cursor: pointer; appearance: none; }
+        .select:focus { outline: none; border-color: var(--accent-blue); }
+        
+        /* Flow Diagram */
+        .routing-flow { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .flow-diagram { display: flex; align-items: center; gap: 16px; padding: 20px 0; overflow-x: auto; flex-wrap: wrap; justify-content: center; }
+        .flow-stage { display: flex; flex-direction: column; align-items: center; }
+        .flow-node { background: var(--bg-tertiary); border: 2px solid var(--border-color); border-radius: 12px; padding: 16px 20px; text-align: center; min-width: 140px; }
+        .flow-node.input { border-color: var(--accent-blue); background: linear-gradient(135deg, rgba(74, 158, 255, 0.15) 0%, rgba(74, 158, 255, 0.05) 100%); }
+        .flow-node.detection { border-color: var(--accent-purple); background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 100%); }
+        .flow-node.output { border-color: var(--accent-green); background: linear-gradient(135deg, rgba(74, 255, 159, 0.15) 0%, rgba(74, 255, 159, 0.05) 100%); }
+        .flow-node-icon { width: 36px; height: 36px; border-radius: 8px; background: rgba(255, 255, 255, 0.1); display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
+        .flow-node-icon svg { width: 20px; height: 20px; }
+        .flow-node-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+        .flow-node-subtitle { font-size: 10px; color: var(--text-muted); }
+        .flow-arrow { display: flex; align-items: center; }
+        .flow-arrow svg { width: 32px; height: 32px; stroke: var(--accent-green); }
+        .flow-categories { display: flex; flex-direction: column; gap: 8px; }
+        .category-node { padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+        .category-node.fire { background: rgba(255, 92, 92, 0.2); border: 1px solid rgba(255, 92, 92, 0.4); color: var(--accent-red); }
+        .category-node.medical { background: rgba(74, 158, 255, 0.2); border: 1px solid rgba(74, 158, 255, 0.4); color: var(--accent-blue); }
+        .category-node.all-call { background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4); color: var(--accent-purple); }
+        .zone-outputs { display: flex; flex-direction: column; gap: 6px; }
+        .zone-output { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border-color); font-size: 11px; }
+        .zone-output-color { width: 10px; height: 10px; border-radius: 3px; }
+        
+        /* Zone Config */
+        .zone-config-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; }
+        .zone-config-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); }
+        .zone-color-indicator { width: 16px; height: 16px; border-radius: 4px; }
+        .toggle-group { display: flex; gap: 12px; margin-bottom: 24px; }
+        .toggle-item { flex: 1; padding: 16px; border-radius: 12px; border: 2px solid var(--border-color); cursor: pointer; transition: all 0.2s; text-align: center; }
+        .toggle-item:hover { border-color: var(--border-active); }
+        .toggle-item.active.fire { border-color: var(--accent-red); background: rgba(255, 92, 92, 0.1); }
+        .toggle-item.active.medical { border-color: var(--accent-blue); background: rgba(74, 158, 255, 0.1); }
+        .toggle-item.active.all-call { border-color: var(--accent-purple); background: rgba(168, 85, 247, 0.1); }
+        .toggle-icon { width: 40px; height: 40px; border-radius: 10px; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; opacity: 0.5; transition: all 0.2s; }
+        .toggle-item.active .toggle-icon { opacity: 1; }
+        .toggle-item.fire .toggle-icon { background: var(--gradient-fire); }
+        .toggle-item.medical .toggle-icon { background: var(--gradient-medical); }
+        .toggle-item.all-call .toggle-icon { background: var(--gradient-all); }
+        .toggle-icon svg { width: 20px; height: 20px; stroke: white; }
+        .toggle-label { font-size: 13px; font-weight: 600; }
+        .toggle-status { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+        .toggle-item.active .toggle-status { color: var(--accent-green); }
+        
+        /* Ramp Settings */
+        .ramp-settings { background: var(--bg-tertiary); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .ramp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .ramp-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .ramp-title svg { width: 18px; height: 18px; stroke: var(--accent-orange); }
+        .ramp-preview { height: 100px; background: var(--bg-secondary); border-radius: 8px; position: relative; margin-bottom: 16px; padding: 10px; }
+        .ramp-preview svg { width: 100%; height: 100%; }
+        .ramp-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .ramp-control { text-align: center; }
+        .ramp-control-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+        .ramp-control-value { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', monospace; color: var(--accent-blue); }
+        
+        /* Speaker List */
+        .speaker-list { display: flex; flex-direction: column; gap: 12px; }
+        .speaker-item { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--bg-tertiary); border-radius: 12px; border: 1px solid var(--border-color); }
+        .speaker-item-icon { width: 44px; height: 44px; border-radius: 10px; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; }
+        .speaker-item-icon svg { width: 22px; height: 22px; stroke: var(--text-secondary); }
+        .speaker-item.online .speaker-item-icon svg { stroke: var(--accent-green); }
+        .speaker-item-info { flex: 1; }
+        .speaker-item-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+        .speaker-item-ip { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+        .speaker-item-volume { width: 120px; }
+        .speaker-item-volume .slider { height: 6px; }
+        .icon-btn { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
+        .icon-btn:hover { border-color: var(--accent-blue); background: rgba(74, 158, 255, 0.1); }
+        .icon-btn svg { width: 18px; height: 18px; stroke: var(--text-secondary); }
+        .icon-btn:hover svg { stroke: var(--accent-blue); }
+        
+        /* Activity Log */
+        .activity-log { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; }
+        .activity-list { max-height: 300px; overflow-y: auto; }
+        .activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-color); }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .activity-icon.fire { background: rgba(255, 92, 92, 0.15); }
+        .activity-icon.fire svg { stroke: var(--accent-red); }
+        .activity-icon.medical { background: rgba(74, 158, 255, 0.15); }
+        .activity-icon.medical svg { stroke: var(--accent-blue); }
+        .activity-icon.system { background: rgba(74, 255, 159, 0.15); }
+        .activity-icon.system svg { stroke: var(--accent-green); }
+        .activity-icon svg { width: 16px; height: 16px; }
+        .activity-content { flex: 1; }
+        .activity-message { font-size: 13px; margin-bottom: 2px; }
+        .activity-time { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+        
+        /* Modal */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 20px; width: 480px; max-height: 90vh; overflow-y: auto; }
+        .modal-header { padding: 24px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; }
+        .modal-title { font-size: 18px; font-weight: 600; }
+        .modal-close { width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--bg-tertiary); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .modal-close svg { width: 18px; height: 18px; stroke: var(--text-secondary); }
+        .modal-body { padding: 24px; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+        .form-input { width: 100%; padding: 12px 16px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-primary); font-size: 14px; font-family: inherit; }
+        .form-input:focus { outline: none; border-color: var(--accent-blue); }
+        .color-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+        .color-option { width: 36px; height: 36px; border-radius: 8px; cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+        .color-option:hover { transform: scale(1.1); }
+        .color-option.selected { border-color: white; box-shadow: 0 0 0 2px var(--accent-blue); }
+        .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-color); display: flex; gap: 12px; justify-content: flex-end; }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-active); }
+        @media (max-width: 1400px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 1200px) { .grid-2 { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="logo">
+                <div class="logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+                <div class="logo-text">Algo<span>Sound</span></div>
+            </div>
+            <div class="nav-section">
+                <div class="nav-label">Overview</div>
+                <div class="nav-item active" onclick="navigateTo('dashboard')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                    <span>Dashboard</span>
+                </div>
+                <div class="nav-item" onclick="navigateTo('zones')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    <span>Station Zones</span>
+                </div>
+                <div class="nav-item" onclick="navigateTo('routing')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <span>Call Routing</span>
+                </div>
+                <div class="nav-label">Audio</div>
+                <div class="nav-item" onclick="navigateTo('audio-input')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                    <span>Audio Input</span>
+                </div>
+                <div class="nav-item" onclick="navigateTo('output')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+                    <span>Output & Speakers</span>
+                </div>
+                <div class="nav-label">System</div>
+                <div class="nav-item" onclick="navigateTo('settings')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4"/></svg>
+                    <span>Settings</span>
+                </div>
+            </div>
+            <div class="alert-status" id="alertStatus">
+                <div class="alert-status-label">System Status</div>
+                <div class="alert-status-value"><div class="status-dot"></div><span id="statusText">Standby</span></div>
+            </div>
+            <div class="user-section">
+                <div class="user-avatar">S4</div>
+                <div class="user-info"><div class="user-name">Station 4</div><div class="user-role">Administrator</div></div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <div class="header-title"><h1 id="pageTitle">Dashboard</h1><p id="pageSubtitle">Monitor and control your station alerting system</p></div>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="refreshStatus()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>Refresh</button>
+                    <button class="btn btn-primary" onclick="openAddZoneModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Zone</button>
+                </div>
+            </header>
+
+            <div class="content">
+                <!-- Dashboard -->
+                <section class="page-section active" id="page-dashboard">
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg></div><div class="stat-value">6</div><div class="stat-label">Total Zones</div></div>
+                        <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div><div class="stat-value">8</div><div class="stat-label">Speakers Online</div></div>
+                        <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg></div><div class="stat-value">3</div><div class="stat-label">Alerts Today</div></div>
+                        <div class="stat-card"><div class="stat-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/></svg></div><div class="stat-value" style="color: var(--accent-green)">●</div><div class="stat-label">Audio Input Active</div></div>
+                    </div>
+                    <div class="test-alert-panel">
+                        <div class="test-alert-header">
+                            <div class="test-alert-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/></svg></div>
+                            <div><div class="test-alert-title">Test Alert System</div><div class="test-alert-subtitle">Simulate alerts to verify zone routing</div></div>
+                        </div>
+                        <div class="test-alert-buttons">
+                            <button class="test-btn fire" onclick="testAlert('fire')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2c0 4-4 6-4 10a4 4 0 108 0c0-4-4-6-4-10z"/></svg>Fire Alert</button>
+                            <button class="test-btn medical" onclick="testAlert('medical')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Medical Alert</button>
+                            <button class="test-btn all" onclick="testAlert('all')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg>All-Call</button>
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="card">
+                            <div class="card-header"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Station Overview</div><button class="btn btn-secondary" onclick="navigateTo('zones')">View All</button></div>
+                            <div style="height: 280px; background: var(--bg-tertiary); border-radius: 12px; position: relative; overflow: hidden;">
+                                <div class="floor-plan-grid"></div>
+                                <div style="position: absolute; top: 10px; left: 10px; width: 100px; height: 80px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.1) 100%); border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.4); padding: 8px;"><div style="font-size: 10px; font-weight: 600;">Dorm 1</div><div style="font-size: 9px; color: var(--text-muted);">2 speakers</div></div>
+                                <div style="position: absolute; top: 10px; left: 120px; width: 100px; height: 80px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.1) 100%); border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.4); padding: 8px;"><div style="font-size: 10px; font-weight: 600;">Dorm 2</div><div style="font-size: 9px; color: var(--text-muted);">2 speakers</div></div>
+                                <div style="position: absolute; top: 100px; left: 10px; width: 210px; height: 60px; background: linear-gradient(135deg, rgba(34, 197, 94, 0.3) 0%, rgba(34, 197, 94, 0.1) 100%); border-radius: 8px; border: 1px solid rgba(34, 197, 94, 0.4); padding: 8px;"><div style="font-size: 10px; font-weight: 600;">Common Area</div><div style="font-size: 9px; color: var(--text-muted);">2 speakers</div></div>
+                                <div style="position: absolute; top: 10px; right: 10px; width: 120px; height: 150px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.3) 0%, rgba(245, 158, 11, 0.1) 100%); border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.4); padding: 8px;"><div style="font-size: 10px; font-weight: 600;">Apparatus Bay</div><div style="font-size: 9px; color: var(--text-muted);">2 horns</div></div>
+                                <div style="position: absolute; bottom: 10px; left: 10px; width: 100px; height: 60px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.3) 0%, rgba(236, 72, 153, 0.1) 100%); border-radius: 8px; border: 1px solid rgba(236, 72, 153, 0.4); padding: 8px;"><div style="font-size: 10px; font-weight: 600;">Office</div><div style="font-size: 9px; color: var(--text-muted);">1 speaker</div></div>
+                            </div>
+                        </div>
+                        <div class="activity-log">
+                            <div class="card-header"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Recent Activity</div></div>
+                            <div class="activity-list">
+                                <div class="activity-item"><div class="activity-icon fire"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2c0 4-4 6-4 10a4 4 0 108 0c0-4-4-6-4-10z"/></svg></div><div class="activity-content"><div class="activity-message"><strong>Fire Alert</strong> distributed to Dorms, Apparatus Bay</div><div class="activity-time">Today, 14:32:15</div></div></div>
+                                <div class="activity-item"><div class="activity-icon medical"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div class="activity-content"><div class="activity-message"><strong>Medical Alert</strong> distributed to Common Area</div><div class="activity-time">Today, 11:45:22</div></div></div>
+                                <div class="activity-item"><div class="activity-icon system"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="20 6 9 17 4 12"/></svg></div><div class="activity-content"><div class="activity-message">Speaker "Dorm 1 - Left" came online</div><div class="activity-time">Today, 09:15:03</div></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Zones Page -->
+                <section class="page-section" id="page-zones">
+                    <div class="floor-plan-container">
+                        <div class="card-header"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Station Floor Plan</div><button class="btn btn-secondary" onclick="openAddZoneModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Zone</button></div>
+                        <div class="floor-plan" id="floorPlan">
+                            <div class="floor-plan-grid"></div>
+                            <div class="zone zone-dorm-1" onclick="selectZone('dorm1')"><div class="zone-header"><span class="zone-name">Dorm 1</span><span class="zone-badge">2 speakers</span></div><div class="zone-call-types"><div class="call-type-indicator call-type-fire active">F</div><div class="call-type-indicator call-type-medical">M</div><div class="call-type-indicator call-type-all active">A</div></div><div class="zone-speakers"><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div></div></div>
+                            <div class="zone zone-dorm-2" onclick="selectZone('dorm2')"><div class="zone-header"><span class="zone-name">Dorm 2</span><span class="zone-badge">2 speakers</span></div><div class="zone-call-types"><div class="call-type-indicator call-type-fire active">F</div><div class="call-type-indicator call-type-medical">M</div><div class="call-type-indicator call-type-all active">A</div></div><div class="zone-speakers"><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div><div class="speaker-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot offline"></div></div></div></div>
+                            <div class="zone zone-common" onclick="selectZone('common')"><div class="zone-header"><span class="zone-name">Common Area</span><span class="zone-badge">2 speakers</span></div><div class="zone-call-types"><div class="call-type-indicator call-type-fire active">F</div><div class="call-type-indicator call-type-medical active">M</div><div class="call-type-indicator call-type-all active">A</div></div><div class="zone-speakers"><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div></div></div>
+                            <div class="zone zone-apparatus" onclick="selectZone('apparatus')"><div class="zone-header"><span class="zone-name">Apparatus Bay</span><span class="zone-badge">2 horns</span></div><div class="zone-call-types"><div class="call-type-indicator call-type-fire active">F</div><div class="call-type-indicator call-type-medical active">M</div><div class="call-type-indicator call-type-all active">A</div></div><div class="zone-speakers"><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M11 5L6 9H2v6h4l5 4V5z"/></svg><div class="speaker-status-dot online"></div></div><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M11 5L6 9H2v6h4l5 4V5z"/></svg><div class="speaker-status-dot online"></div></div></div></div>
+                            <div class="zone zone-office" onclick="selectZone('office')"><div class="zone-header"><span class="zone-name">Office</span><span class="zone-badge">1 speaker</span></div><div class="zone-call-types"><div class="call-type-indicator call-type-fire active">F</div><div class="call-type-indicator call-type-medical active">M</div><div class="call-type-indicator call-type-all active">A</div></div><div class="zone-speakers"><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div></div></div>
+                            <div class="zone zone-kitchen" onclick="selectZone('kitchen')"><div class="zone-header"><span class="zone-name">Kitchen</span><span class="zone-badge">1 speaker</span></div><div class="zone-call-types"><div class="call-type-indicator call-type-fire active">F</div><div class="call-type-indicator call-type-medical active">M</div><div class="call-type-indicator call-type-all active">A</div></div><div class="zone-speakers"><div class="speaker-icon online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg><div class="speaker-status-dot online"></div></div></div></div>
+                        </div>
+                    </div>
+                    <div class="zone-config-panel">
+                        <div class="zone-config-header"><div class="zone-color-indicator" style="background: var(--zone-dorm);"></div><div><h3 id="selectedZoneName">Select a Zone</h3><p style="font-size: 13px; color: var(--text-secondary);">Click a zone to configure</p></div></div>
+                        <label class="control-label">Call Type Routing</label>
+                        <div class="toggle-group">
+                            <div class="toggle-item fire active" onclick="toggleCallType(this)"><div class="toggle-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2c0 4-4 6-4 10a4 4 0 108 0c0-4-4-6-4-10z"/></svg></div><div class="toggle-label">Fire</div><div class="toggle-status">Enabled</div></div>
+                            <div class="toggle-item medical" onclick="toggleCallType(this)"><div class="toggle-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div class="toggle-label">Medical</div><div class="toggle-status">Disabled</div></div>
+                            <div class="toggle-item all-call active" onclick="toggleCallType(this)"><div class="toggle-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div><div class="toggle-label">All-Call</div><div class="toggle-status">Enabled</div></div>
+                        </div>
+                        <div class="ramp-settings">
+                            <div class="ramp-header"><div class="ramp-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Audio Ramp Profile (Dorm)</div><button class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Edit</button></div>
+                            <div class="ramp-preview"><svg viewBox="0 0 400 80" preserveAspectRatio="none"><defs><linearGradient id="rampGradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#4a9eff;stop-opacity:0.3"/><stop offset="100%" style="stop-color:#4aff9f;stop-opacity:0.3"/></linearGradient></defs><path d="M0,70 Q50,70 100,60 T200,40 T300,20 T400,10" fill="none" stroke="url(#rampGradient)" stroke-width="3"/><path d="M0,70 Q50,70 100,60 T200,40 T300,20 T400,10 L400,80 L0,80 Z" fill="url(#rampGradient)" opacity="0.3"/></svg></div>
+                            <div class="ramp-controls"><div class="ramp-control"><div class="ramp-control-label">Start Volume</div><div class="ramp-control-value">35 dBA</div></div><div class="ramp-control"><div class="ramp-control-label">End Volume</div><div class="ramp-control-value">60 dBA</div></div><div class="ramp-control"><div class="ramp-control-label">Duration</div><div class="ramp-control-value">12 sec</div></div></div>
+                        </div>
+                        <div class="speaker-list">
+                            <label class="control-label">Speakers in Zone</label>
+                            <div class="speaker-item online"><div class="speaker-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div><div class="speaker-item-info"><div class="speaker-item-name">Dorm 1 - Left</div><div class="speaker-item-ip">192.168.68.120</div></div><div class="speaker-item-volume"><input type="range" class="slider" value="50"></div><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button></div>
+                            <div class="speaker-item online"><div class="speaker-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div><div class="speaker-item-info"><div class="speaker-item-name">Dorm 1 - Right</div><div class="speaker-item-ip">192.168.68.121</div></div><div class="speaker-item-volume"><input type="range" class="slider" value="50"></div><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Call Routing Page -->
+                <section class="page-section" id="page-routing">
+                    <div class="routing-flow">
+                        <div class="card-header"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Call Routing Flow</div></div>
+                        <div class="flow-diagram">
+                            <div class="flow-stage"><div class="flow-node input"><div class="flow-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke: var(--accent-blue)"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg></div><div class="flow-node-title">Audio Input</div><div class="flow-node-subtitle">Focusrite Scarlett Solo</div></div></div>
+                            <div class="flow-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+                            <div class="flow-stage"><div class="flow-node detection"><div class="flow-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke: var(--accent-purple)"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="flow-node-title">Tone Detection</div><div class="flow-node-subtitle">Mach Alert Decoder</div></div></div>
+                            <div class="flow-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+                            <div class="flow-stage"><div class="flow-categories"><div class="category-node fire">🔥 Fire</div><div class="category-node medical">🏥 Medical</div><div class="category-node all-call">📢 All-Call</div></div></div>
+                            <div class="flow-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+                            <div class="flow-stage"><div class="flow-node output"><div class="flow-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke: var(--accent-green)"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div><div class="flow-node-title">8301 Paging Adapter</div><div class="flow-node-subtitle">192.168.68.116</div></div></div>
+                            <div class="flow-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+                            <div class="flow-stage"><div class="zone-outputs"><div class="zone-output"><div class="zone-output-color" style="background: var(--zone-dorm)"></div><span>Dorm 1, Dorm 2</span></div><div class="zone-output"><div class="zone-output-color" style="background: var(--zone-common)"></div><span>Common Area</span></div><div class="zone-output"><div class="zone-output-color" style="background: var(--zone-apparatus)"></div><span>Apparatus Bay</span></div><div class="zone-output"><div class="zone-output-color" style="background: var(--zone-office)"></div><span>Office, Kitchen</span></div></div></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Audio Input Page -->
+                <section class="page-section" id="page-audio-input">
+                    <div class="audio-panel">
+                        <div class="audio-device-header">
+                            <div class="device-icon-large"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg></div>
+                            <div class="device-info"><h3>Focusrite Scarlett Solo</h3><p>USB Audio Interface • Line Input Active</p></div>
+                            <div class="device-status"><div class="device-status-dot"></div><span>Connected</span></div>
+                        </div>
+                        <div class="vu-meter-container">
+                            <div class="vu-meter-label"><span>Input Level</span><span id="vuLevel">-18 dB</span></div>
+                            <div class="vu-meter" id="vuMeter"></div>
+                            <div class="vu-meter-db"><span>-60</span><span>-40</span><span>-20</span><span>-10</span><span>0</span></div>
+                        </div>
+                        <div class="tone-detection">
+                            <div class="tone-detection-header"><div class="tone-detection-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Tone Detection</div><div class="detection-status listening">● Listening</div></div>
+                            <div class="tone-categories">
+                                <div class="tone-category fire"><div class="tone-category-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2c0 4-4 6-4 10a4 4 0 108 0c0-4-4-6-4-10z"/></svg></div><div class="tone-category-name">Fire</div><div class="tone-category-last">Last: 14:32</div></div>
+                                <div class="tone-category medical"><div class="tone-category-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div class="tone-category-name">Medical</div><div class="tone-category-last">Last: 11:45</div></div>
+                                <div class="tone-category all-call"><div class="tone-category-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div><div class="tone-category-name">All-Call</div><div class="tone-category-last">Last: Yesterday</div></div>
+                            </div>
+                        </div>
+                        <div class="controls-grid">
+                            <div class="control-group"><label class="control-label">Input Source</label><div class="select-wrapper"><select class="select"><option>Line In (Default)</option><option>Microphone</option><option>Aux Input</option></select></div></div>
+                            <div class="control-group"><label class="control-label">Input Gain</label><div class="slider-container"><span class="slider-value">50%</span><input type="range" class="slider" value="50"></div></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Output Page -->
+                <section class="page-section" id="page-output">
+                    <div class="audio-panel">
+                        <div class="card-header"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>8301 Paging Adapter</div></div>
+                        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding: 16px; background: var(--bg-tertiary); border-radius: 12px;">
+                            <div style="width: 48px; height: 48px; border-radius: 10px; background: var(--gradient-medical); display: flex; align-items: center; justify-content: center;"><svg viewBox="0 0 24 24" fill="none" stroke="white" style="width: 24px; height: 24px;"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+                            <div style="flex: 1;"><div style="font-size: 16px; font-weight: 600;">Paging Adapter</div><div style="font-size: 13px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">192.168.68.116</div></div>
+                            <div class="device-status"><div class="device-status-dot"></div><span>Online</span></div>
+                        </div>
+                        <label class="control-label">Output Method</label>
+                        <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                            <div style="flex: 1; padding: 16px; border-radius: 10px; border: 2px solid var(--accent-blue); background: rgba(74, 158, 255, 0.1); text-align: center; cursor: pointer;"><div style="font-size: 14px; font-weight: 600; color: var(--accent-blue);">Line Out</div><div style="font-size: 12px; color: var(--text-muted);">3.5mm / RCA</div></div>
+                            <div style="flex: 1; padding: 16px; border-radius: 10px; border: 1px solid var(--border-color); text-align: center; cursor: pointer;"><div style="font-size: 14px; font-weight: 600;">Aux Cable</div><div style="font-size: 12px; color: var(--text-muted);">Direct connection</div></div>
+                        </div>
+                        <label class="control-label">Linked Speakers (via 8301)</label>
+                        <div class="speaker-list">
+                            <div class="speaker-item online"><div class="speaker-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div><div class="speaker-item-info"><div class="speaker-item-name">8180G2 Speaker 1</div><div class="speaker-item-ip">192.168.68.112</div></div><div class="speaker-item-volume"><input type="range" class="slider" value="50"></div><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button></div>
+                            <div class="speaker-item online"><div class="speaker-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div><div class="speaker-item-info"><div class="speaker-item-name">8180G2 Speaker 2</div><div class="speaker-item-ip">192.168.68.113</div></div><div class="speaker-item-volume"><input type="range" class="slider" value="65"></div><button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Settings Page -->
+                <section class="page-section" id="page-settings">
+                    <div class="card" style="margin-bottom: 24px;">
+                        <div class="card-header"><div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/></svg>System Settings</div></div>
+                        <div class="form-group"><label class="form-label">Station Name</label><input type="text" class="form-input" value="Station 4"></div>
+                        <div class="form-group"><label class="form-label">Default API Password</label><input type="password" class="form-input" value="algo"></div>
+                        <div class="form-group"><label class="form-label">Default Volume (0-100)</label><div class="slider-container" style="padding-top: 24px;"><span class="slider-value">50%</span><input type="range" class="slider" value="50"></div></div>
+                        <button class="btn btn-primary">Save Settings</button>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Add Zone Modal -->
+    <div class="modal-overlay" id="addZoneModal">
+        <div class="modal">
+            <div class="modal-header"><div class="modal-title">Add New Zone</div><button class="modal-close" onclick="closeAddZoneModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">Zone Name</label><input type="text" class="form-input" placeholder="e.g., Training Room"></div>
+                <div class="form-group"><label class="form-label">Zone Color</label><div class="color-picker"><div class="color-option selected" style="background: #6366f1;"></div><div class="color-option" style="background: #22c55e;"></div><div class="color-option" style="background: #f59e0b;"></div><div class="color-option" style="background: #ec4899;"></div><div class="color-option" style="background: #14b8a6;"></div><div class="color-option" style="background: #8b5cf6;"></div></div></div>
+                <div class="form-group"><label class="form-label">Zone Type</label><div class="select-wrapper"><select class="select"><option>Standard (Common Area)</option><option>Dorm (Ramped Audio)</option><option>Bay (High Volume)</option></select></div></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" onclick="closeAddZoneModal()">Cancel</button><button class="btn btn-primary">Add Zone</button></div>
+        </div>
+    </div>
+
+    <script>
+        // Navigation
+        function navigateTo(page) {
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            document.querySelectorAll('.page-section').forEach(section => section.classList.remove('active'));
+            document.querySelector(`[onclick="navigateTo('${page}')"]`).classList.add('active');
+            document.getElementById('page-' + page).classList.add('active');
+            const titles = { dashboard: ['Dashboard', 'Monitor and control your station alerting system'], zones: ['Station Zones', 'Configure zones and speaker assignments'], routing: ['Call Routing', 'Visual flow of alert distribution'], 'audio-input': ['Audio Input', 'Focusrite Scarlett Solo configuration'], output: ['Output & Speakers', 'Manage 8301 paging adapter and linked speakers'], settings: ['Settings', 'System configuration'] };
+            document.getElementById('pageTitle').textContent = titles[page][0];
+            document.getElementById('pageSubtitle').textContent = titles[page][1];
+        }
+
+        // Zone selection
+        function selectZone(zoneId) {
+            document.querySelectorAll('.zone').forEach(z => z.classList.remove('selected'));
+            document.getElementById('zone-' + zoneId)?.classList.add('selected');
+            const names = { dorm1: 'Dorm 1', dorm2: 'Dorm 2', common: 'Common Area', apparatus: 'Apparatus Bay', office: 'Office', kitchen: 'Kitchen' };
+            document.getElementById('selectedZoneName').textContent = names[zoneId] || 'Unknown Zone';
+        }
+
+        // Toggle call types
+        function toggleCallType(el) {
+            el.classList.toggle('active');
+            el.querySelector('.toggle-status').textContent = el.classList.contains('active') ? 'Enabled' : 'Disabled';
+        }
+
+        // Test alerts
+        function testAlert(type) {
+            const status = document.getElementById('alertStatus');
+            const statusText = document.getElementById('statusText');
+            status.classList.add('active-alert');
+            statusText.textContent = type.charAt(0).toUpperCase() + type.slice(1) + ' Alert';
+            document.querySelectorAll('.zone').forEach(z => z.classList.add('alerting'));
+            setTimeout(() => {
+                status.classList.remove('active-alert');
+                statusText.textContent = 'Standby';
+                document.querySelectorAll('.zone').forEach(z => z.classList.remove('alerting'));
+            }, 3000);
+        }
+
+        // Refresh
+        function refreshStatus() { location.reload(); }
+
+        // Modal
+        function openAddZoneModal() { document.getElementById('addZoneModal').classList.add('active'); }
+        function closeAddZoneModal() { document.getElementById('addZoneModal').classList.remove('active'); }
+
+        // Color picker
+        document.querySelectorAll('.color-option').forEach(opt => {
+            opt.addEventListener('click', () => {
+                document.querySelectorAll('.color-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+            });
+        });
+
+        // VU Meter simulation
+        const vuMeter = document.getElementById('vuMeter');
+        for (let i = 0; i < 40; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'vu-bar';
+            if (i > 32) bar.classList.add('red');
+            else if (i > 28) bar.classList.add('yellow');
+            vuMeter.appendChild(bar);
+        }
+
+        function animateVU() {
+            const bars = vuMeter.querySelectorAll('.vu-bar');
+            const level = Math.floor(Math.random() * 15) + 10;
+            bars.forEach((bar, i) => {
+                bar.classList.toggle('active', i < level);
+            });
+            document.getElementById('vuLevel').textContent = (-60 + level * 1.5).toFixed(0) + ' dB';
+            setTimeout(animateVU, 100);
+        }
+        animateVU();
+    </script>
+</body>
+</html>
