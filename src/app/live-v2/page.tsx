@@ -141,6 +141,8 @@ function LiveV2Content() {
     zoneRouting,
     zonedPlayback,
     setZonedPlayback,
+    zoneScheduleEnabled,
+    setZoneScheduleEnabled,
   } = useSimpleMonitoring();
 
   // Safety check: ensure selectedDevices is always an array
@@ -293,41 +295,62 @@ function LiveV2Content() {
                 <div className="grid gap-4 md:grid-cols-3">
                   {/* Medical VU Meter */}
                   {medicalEnabled && (
-                    <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-blue)]/30">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-semibold text-[var(--accent-blue)]">🏥 MEDICAL</span>
-                        <span className="text-xs font-mono text-[var(--accent-blue)]">
-                          {isCapturing ? `${medicalAudioLevel.toFixed(1)}%` : "-- %"}
-                        </span>
+                    medicalInputDevice ? (
+                      <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-blue)]/30">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs font-semibold text-[var(--accent-blue)]">🏥 MEDICAL</span>
+                          <span className="text-xs font-mono text-[var(--accent-blue)]">
+                            {isCapturing ? `${medicalAudioLevel.toFixed(1)}%` : "-- %"}
+                          </span>
+                        </div>
+                        <VUMeter level={isCapturing ? medicalAudioLevel : 0} barCount={16} showPeakHold={false} />
                       </div>
-                      <VUMeter level={isCapturing ? medicalAudioLevel : 0} barCount={16} showPeakHold={false} />
-                    </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-blue)]/20 flex flex-col items-center justify-center gap-2 min-h-[80px]">
+                        <span className="text-xs font-semibold text-[var(--accent-blue)]">🏥 MEDICAL</span>
+                        <span className="text-[10px] text-[var(--text-muted)] text-center">No input device selected</span>
+                      </div>
+                    )
                   )}
 
                   {/* Fire VU Meter */}
                   {fireEnabled && (
-                    <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-red)]/30">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-semibold text-[var(--accent-red)]">🔥 FIRE</span>
-                        <span className="text-xs font-mono text-[var(--accent-red)]">
-                          {isCapturing ? `${fireAudioLevel.toFixed(1)}%` : "-- %"}
-                        </span>
+                    fireInputDevice ? (
+                      <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-red)]/30">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs font-semibold text-[var(--accent-red)]">🔥 FIRE</span>
+                          <span className="text-xs font-mono text-[var(--accent-red)]">
+                            {isCapturing ? `${fireAudioLevel.toFixed(1)}%` : "-- %"}
+                          </span>
+                        </div>
+                        <VUMeter level={isCapturing ? fireAudioLevel : 0} barCount={16} showPeakHold={false} />
                       </div>
-                      <VUMeter level={isCapturing ? fireAudioLevel : 0} barCount={16} showPeakHold={false} />
-                    </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-red)]/20 flex flex-col items-center justify-center gap-2 min-h-[80px]">
+                        <span className="text-xs font-semibold text-[var(--accent-red)]">🔥 FIRE</span>
+                        <span className="text-[10px] text-[var(--text-muted)] text-center">No input device selected</span>
+                      </div>
+                    )
                   )}
 
                   {/* All-Call VU Meter */}
                   {allCallEnabled && (
-                    <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-purple)]/30">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-semibold text-[var(--accent-purple)]">📢 ALL-CALL</span>
-                        <span className="text-xs font-mono text-[var(--accent-purple)]">
-                          {isCapturing ? `${allCallAudioLevel.toFixed(1)}%` : "-- %"}
-                        </span>
+                    allCallInputDevice ? (
+                      <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-purple)]/30">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs font-semibold text-[var(--accent-purple)]">📢 ALL-CALL</span>
+                          <span className="text-xs font-mono text-[var(--accent-purple)]">
+                            {isCapturing ? `${allCallAudioLevel.toFixed(1)}%` : "-- %"}
+                          </span>
+                        </div>
+                        <VUMeter level={isCapturing ? allCallAudioLevel : 0} barCount={16} showPeakHold={false} />
                       </div>
-                      <VUMeter level={isCapturing ? allCallAudioLevel : 0} barCount={16} showPeakHold={false} />
-                    </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--accent-purple)]/20 flex flex-col items-center justify-center gap-2 min-h-[80px]">
+                        <span className="text-xs font-semibold text-[var(--accent-purple)]">📢 ALL-CALL</span>
+                        <span className="text-[10px] text-[var(--text-muted)] text-center">No input device selected</span>
+                      </div>
+                    )
                   )}
                 </div>
 
@@ -1190,7 +1213,7 @@ function LiveV2Content() {
                     <MapIcon className="h-4 w-4 text-[var(--accent-purple)]" />
                     <div>
                       <CardTitle className="text-sm">Zone Routing</CardTitle>
-                      {dayNightMode ? (
+                      {zoneScheduleEnabled ? (
                         <p className="text-[10px] text-[var(--accent-purple)] mt-0.5 flex items-center gap-1">
                           {isDaytime ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
                           {isDaytime ? "Auto · Day — all speakers" : "Auto · Night — channel routing active"}
@@ -1203,20 +1226,35 @@ function LiveV2Content() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {dayNightMode && (
+                    {zoneScheduleEnabled && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent-purple)]/15 text-[var(--accent-purple)] font-medium">
                         Auto
                       </span>
                     )}
                     <Switch
                       checked={zonedPlayback}
-                      onCheckedChange={setZonedPlayback}
+                      onCheckedChange={(checked) => {
+                        setZonedPlayback(checked);
+                      }}
                     />
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="py-0 pb-3 space-y-2">
-                {dayNightMode && (
+                {/* Link to Schedule sub-toggle */}
+                <div className="flex items-center justify-between p-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)]">
+                  <div>
+                    <p className="text-xs font-medium text-[var(--text-primary)]">Link to Schedule</p>
+                    <p className="text-[10px] text-[var(--text-muted)]">Auto-switch zones based on Day/Night hours</p>
+                  </div>
+                  <Switch
+                    checked={zoneScheduleEnabled}
+                    onCheckedChange={setZoneScheduleEnabled}
+                  />
+                </div>
+
+                {/* Current schedule state indicator */}
+                {zoneScheduleEnabled && (
                   <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-[10px] ${
                     isDaytime
                       ? "bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]"
@@ -1225,11 +1263,12 @@ function LiveV2Content() {
                     {isDaytime ? <Sun className="h-3 w-3 flex-shrink-0" /> : <Moon className="h-3 w-3 flex-shrink-0" />}
                     <span>
                       {isDaytime
-                        ? "Day mode: all speakers receive all channels"
-                        : "Night mode: each channel routes to its assigned zones only"}
+                        ? "Day — all speakers receive all channels"
+                        : "Night — each channel routes to its assigned zones only"}
                     </span>
                   </div>
                 )}
+
                 {contextZones.length === 0 ? (
                   <p className="text-xs text-[var(--text-muted)] text-center py-2">No zones configured</p>
                 ) : (
@@ -1267,11 +1306,6 @@ function LiveV2Content() {
                       );
                     })}
                   </div>
-                )}
-                {!dayNightMode && !zonedPlayback && (
-                  <p className="text-[10px] text-[var(--text-muted)] pt-1">
-                    Tip: Enable Day/Night Mode in Detection Settings to auto-switch zone routing with the schedule.
-                  </p>
                 )}
               </CardContent>
             </Card>

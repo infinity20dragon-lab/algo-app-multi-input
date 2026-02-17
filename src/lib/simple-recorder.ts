@@ -1624,8 +1624,9 @@ export class SimpleRecorder {
             this.currentPlaybackItem.playbackStarted = true;
             this.log(`🔊 [${this.currentPlaybackItem.channel.toUpperCase()}] Playback starting (${available} samples = ${(available / this.audioContext!.sampleRate).toFixed(2)}s buffered)`);
 
-            // Zone switch (fire-and-forget async — hardware state gates actual playback)
-            if (this.lastPlaybackChannel !== this.currentPlaybackItem.channel) {
+            // Zone switch — only when zoned playback is enabled
+            // When disabled: all linked speakers stay active for all channels, no re-routing
+            if (this.config.zonedPlayback && this.lastPlaybackChannel !== this.currentPlaybackItem.channel) {
               this.switchHardwareForChannel(this.currentPlaybackItem.channel, this.lastPlaybackChannel)
                 .catch(err => this.log(`❌ Zone switch failed: ${err}`, 'error'));
             }

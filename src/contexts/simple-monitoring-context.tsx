@@ -96,6 +96,8 @@ interface SimpleMonitoringContextType {
   zoneRouting: Record<string, ZoneRouting>;
   zonedPlayback: boolean;
   setZonedPlayback: (enabled: boolean) => void;
+  zoneScheduleEnabled: boolean;
+  setZoneScheduleEnabled: (enabled: boolean) => void;
 
   // Emulation
   emulationMode: boolean;
@@ -237,6 +239,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const [zones, setZones] = useState<Zone[]>([]);
   const [zoneRouting, setZoneRouting] = useState<Record<string, ZoneRouting>>({});
   const [zonedPlayback, setZonedPlayback] = useState(false);
+  const [zoneScheduleEnabled, setZoneScheduleEnabled] = useState(false);
 
   // Emulation
   const [emulationMode, setEmulationMode] = useState(false);
@@ -272,10 +275,11 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   }, [user]);
 
   // Auto-manage zonedPlayback based on day/night schedule
-  // When dayNightMode is on: night = zone routing, day = all speakers
+  // When zoneScheduleEnabled is on: night = zone routing active, day = all speakers
+  // Uses dayStartHour/dayEndHour regardless of whether dayNightMode (detection ramping) is on
   // Runs every minute to catch schedule transitions mid-session
   useEffect(() => {
-    if (!dayNightMode) return;
+    if (!zoneScheduleEnabled) return;
 
     const checkSchedule = () => {
       const now = new Date();
@@ -291,10 +295,10 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       }
     };
 
-    checkSchedule(); // Apply immediately on mount or when schedule changes
+    checkSchedule(); // Apply immediately when schedule link is toggled on
     const interval = setInterval(checkSchedule, 60_000); // Re-check every minute
     return () => clearInterval(interval);
-  }, [dayNightMode, dayStartHour, dayEndHour]);
+  }, [zoneScheduleEnabled, dayStartHour, dayEndHour]);
 
   // Load settings from sessionState on mount
   useEffect(() => {
@@ -356,6 +360,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
 
     // Load zone settings
     if (sessionState.zonedPlayback !== undefined) setZonedPlayback(sessionState.zonedPlayback);
+    if (sessionState.zoneScheduleEnabled !== undefined) setZoneScheduleEnabled(sessionState.zoneScheduleEnabled);
   }, [sessionState]);
 
   // Sync settings to RTDB when they change
@@ -400,6 +405,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       fireEnabled,
       allCallEnabled,
       zonedPlayback,
+      zoneScheduleEnabled,
     });
   }, [
     selectedDevices,
@@ -412,7 +418,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     saveRecording, loggingEnabled, playbackEnabled, emulationMode, emulationNetworkDelay,
     medicalInputDevice, fireInputDevice, allCallInputDevice,
     medicalEnabled, fireEnabled, allCallEnabled,
-    zonedPlayback,
+    zonedPlayback, zoneScheduleEnabled,
     syncSessionState,
   ]);
 
@@ -1007,6 +1013,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     zoneRouting,
     zonedPlayback,
     setZonedPlayback,
+    zoneScheduleEnabled,
+    setZoneScheduleEnabled,
 
     // Emulation
     emulationMode,
