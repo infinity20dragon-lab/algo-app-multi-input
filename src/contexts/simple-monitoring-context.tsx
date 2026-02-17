@@ -45,6 +45,12 @@ interface SimpleMonitoringContextType {
   medicalEnabled: boolean;
   fireEnabled: boolean;
   allCallEnabled: boolean;
+  medicalChannel: number;
+  fireChannel: number;
+  allCallChannel: number;
+  setMedicalChannel: (channel: number) => void;
+  setFireChannel: (channel: number) => void;
+  setAllCallChannel: (channel: number) => void;
 
   // Audio Settings
   batchDuration: number;
@@ -191,6 +197,11 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const [fireEnabled, setFireEnabled] = useState(true);
   const [allCallEnabled, setAllCallEnabled] = useState(true);
 
+  // Channel selection per input (0=Left/Mono, 1=Right)
+  const [medicalChannel, setMedicalChannel] = useState(0);
+  const [fireChannel, setFireChannel] = useState(1);
+  const [allCallChannel, setAllCallChannel] = useState(0);
+
   // Audio Settings
   const [batchDuration, setBatchDuration] = useState(5000);
   const [silenceTimeout, setSilenceTimeout] = useState(8000);
@@ -252,6 +263,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const recorderRef = useRef<SimpleRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const linkedSpeakersRef = useRef<any[]>([]);
+  const splitContextRef = useRef<AudioContext | null>(null);
 
   // Update recorder's playback volume when it changes
   useEffect(() => {
@@ -357,6 +369,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     if (sessionState.medicalEnabled !== undefined) setMedicalEnabled(sessionState.medicalEnabled);
     if (sessionState.fireEnabled !== undefined) setFireEnabled(sessionState.fireEnabled);
     if (sessionState.allCallEnabled !== undefined) setAllCallEnabled(sessionState.allCallEnabled);
+    if (sessionState.medicalChannel !== undefined) setMedicalChannel(sessionState.medicalChannel);
+    if (sessionState.fireChannel !== undefined) setFireChannel(sessionState.fireChannel);
+    if (sessionState.allCallChannel !== undefined) setAllCallChannel(sessionState.allCallChannel);
 
     // Load zone settings
     if (sessionState.zonedPlayback !== undefined) setZonedPlayback(sessionState.zonedPlayback);
@@ -404,6 +419,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       medicalEnabled,
       fireEnabled,
       allCallEnabled,
+      medicalChannel,
+      fireChannel,
+      allCallChannel,
       zonedPlayback,
       zoneScheduleEnabled,
     });
@@ -418,6 +436,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     saveRecording, loggingEnabled, playbackEnabled, emulationMode, emulationNetworkDelay,
     medicalInputDevice, fireInputDevice, allCallInputDevice,
     medicalEnabled, fireEnabled, allCallEnabled,
+    medicalChannel, fireChannel, allCallChannel,
     zonedPlayback, zoneScheduleEnabled,
     syncSessionState,
   ]);
@@ -434,43 +453,88 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       let allCallStream: MediaStream | null = null;
 
       if (multiInputMode) {
-        // Get streams for ENABLED inputs only
-        const streamPromises: Promise<MediaStream | null>[] = [];
+        // Helper: extract a single channel from a stereo stream
+        const extractChannel = (stereoStream: MediaStream, channelIndex: number, ctx: AudioContext): MediaStream => {
+          const source = ctx.createMediaStreamSource(stereoStream);
+          const splitter = ctx.createChannelSplitter(2);
+          source.connect(splitter);
+          const merger = ctx.createChannelMerger(1);
+          splitter.connect(merger, channelIndex, 0);
+          const dest = ctx.createMediaStreamDestination();
+          merger.connect(dest);
+          return dest.stream;
+        };
 
-        // Medical
-        if (medicalEnabled && medicalInputDevice) {
-          const medicalConstraints: MediaStreamConstraints = {
-            audio: { deviceId: { exact: medicalInputDevice } },
+        // Check if Medical and Fire share the same device (e.g., 4i4 stereo → L+R split)
+        const medFireSharedDevice = medicalEnabled && fireEnabled &&
+          medicalInputDevice && fireInputDevice &&
+          medicalInputDevice === fireInputDevice;
+
+        if (medFireSharedDevice) {
+          // Single capture, split into two channels
+          const rawStream = await navigator.mediaDevices.getUserMedia({
+            audio: { deviceId: { exact: medicalInputDevice! }, channelCount: { ideal: 2 } },
             video: false,
-          };
-          streamPromises.push(navigator.mediaDevices.getUserMedia(medicalConstraints));
+          });
+          const splitCtx = new AudioContext();
+          splitContextRef.current = splitCtx;
+          medicalStream = extractChannel(rawStream, medicalChannel, splitCtx);
+          fireStream = extractChannel(rawStream, fireChannel, splitCtx);
+          const devName = devices.find(d => d.id === medicalInputDevice)?.name || 'shared device';
+          addLog(`🔀 Shared capture: ${devName} → Medical(${medicalChannel === 0 ? 'L' : 'R'}) + Fire(${fireChannel === 0 ? 'L' : 'R'})`, 'info');
         } else {
-          streamPromises.push(Promise.resolve(null));
+          // Independent captures
+          const streamPromises: Promise<MediaStream | null>[] = [];
+
+          if (medicalEnabled && medicalInputDevice) {
+            streamPromises.push(navigator.mediaDevices.getUserMedia({
+              audio: { deviceId: { exact: medicalInputDevice }, channelCount: { ideal: 2 } },
+              video: false,
+            }));
+          } else {
+            streamPromises.push(Promise.resolve(null));
+          }
+
+          if (fireEnabled && fireInputDevice) {
+            streamPromises.push(navigator.mediaDevices.getUserMedia({
+              audio: { deviceId: { exact: fireInputDevice }, channelCount: { ideal: 2 } },
+              video: false,
+            }));
+          } else {
+            streamPromises.push(Promise.resolve(null));
+          }
+
+          const [rawMedical, rawFire] = await Promise.all(streamPromises);
+
+          // Apply channel selection if needed
+          if (rawMedical && medicalChannel !== 0) {
+            if (!splitContextRef.current) splitContextRef.current = new AudioContext();
+            medicalStream = extractChannel(rawMedical, medicalChannel, splitContextRef.current);
+          } else {
+            medicalStream = rawMedical;
+          }
+
+          if (rawFire && fireChannel !== 0) {
+            if (!splitContextRef.current) splitContextRef.current = new AudioContext();
+            fireStream = extractChannel(rawFire, fireChannel, splitContextRef.current);
+          } else {
+            fireStream = rawFire;
+          }
         }
 
-        // Fire
-        if (fireEnabled && fireInputDevice) {
-          const fireConstraints: MediaStreamConstraints = {
-            audio: { deviceId: { exact: fireInputDevice } },
-            video: false,
-          };
-          streamPromises.push(navigator.mediaDevices.getUserMedia(fireConstraints));
-        } else {
-          streamPromises.push(Promise.resolve(null));
-        }
-
-        // All-Call
+        // All-Call — always independent
         if (allCallEnabled && allCallInputDevice) {
-          const allCallConstraints: MediaStreamConstraints = {
-            audio: { deviceId: { exact: allCallInputDevice } },
+          const rawAllCall = await navigator.mediaDevices.getUserMedia({
+            audio: { deviceId: { exact: allCallInputDevice }, channelCount: { ideal: 2 } },
             video: false,
-          };
-          streamPromises.push(navigator.mediaDevices.getUserMedia(allCallConstraints));
-        } else {
-          streamPromises.push(Promise.resolve(null));
+          });
+          if (allCallChannel !== 0) {
+            if (!splitContextRef.current) splitContextRef.current = new AudioContext();
+            allCallStream = extractChannel(rawAllCall, allCallChannel, splitContextRef.current);
+          } else {
+            allCallStream = rawAllCall;
+          }
         }
-
-        [medicalStream, fireStream, allCallStream] = await Promise.all(streamPromises);
 
         const enabledCount = [medicalStream, fireStream, allCallStream].filter(s => s !== null).length;
         addLog(`✓ ${enabledCount} input stream(s) acquired`, 'info');
@@ -717,7 +781,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       console.error('Failed to start monitoring:', error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInputDevice, batchDuration, silenceTimeout, playbackDelay, hardwareGracePeriod, saveRecording, devices, selectedDevices, audioThreshold, emulationMode, emulationNetworkDelay]);
+  }, [selectedInputDevice, batchDuration, silenceTimeout, playbackDelay, hardwareGracePeriod, saveRecording, devices, selectedDevices, audioThreshold, emulationMode, emulationNetworkDelay, medicalInputDevice, fireInputDevice, allCallInputDevice, medicalEnabled, fireEnabled, allCallEnabled, medicalChannel, fireChannel, allCallChannel]);
 
   // Stop monitoring
   const stopMonitoring = useCallback(async () => {
@@ -732,6 +796,11 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
+      }
+
+      if (splitContextRef.current) {
+        splitContextRef.current.close();
+        splitContextRef.current = null;
       }
 
       linkedSpeakersRef.current = [];
@@ -962,6 +1031,12 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     medicalEnabled,
     fireEnabled,
     allCallEnabled,
+    medicalChannel,
+    fireChannel,
+    allCallChannel,
+    setMedicalChannel,
+    setFireChannel,
+    setAllCallChannel,
 
     // Audio Settings
     batchDuration,

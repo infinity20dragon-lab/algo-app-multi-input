@@ -70,6 +70,12 @@ function LiveV2Content() {
     setMedicalEnabled,
     setFireEnabled,
     setAllCallEnabled,
+    medicalChannel,
+    fireChannel,
+    allCallChannel,
+    setMedicalChannel,
+    setFireChannel,
+    setAllCallChannel,
     rampEnabled,
     rampDuration,
     dayNightMode,
@@ -581,18 +587,35 @@ function LiveV2Content() {
                       />
                     </div>
                     {medicalEnabled && (
-                      <Select
-                        value={medicalInputDevice || ""}
-                        onChange={(e) => setMedicalInputDevice(e.target.value)}
-                        disabled={isCapturing}
-                      >
-                        <option value="">Select Input Device</option>
-                        {inputDevices.map((device) => (
-                          <option key={device.deviceId} value={device.deviceId}>
-                            {device.label || `Input ${device.deviceId.slice(0, 8)}`}
-                          </option>
-                        ))}
-                      </Select>
+                      <div className="flex gap-2 items-center">
+                        <Select
+                          value={medicalInputDevice || ""}
+                          onChange={(e) => setMedicalInputDevice(e.target.value)}
+                          disabled={isCapturing}
+                          className="flex-1"
+                        >
+                          <option value="">Select Input Device</option>
+                          {inputDevices.map((device) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                            </option>
+                          ))}
+                        </Select>
+                        {medicalInputDevice && (
+                          <div className="flex rounded-lg border border-[var(--accent-blue)]/40 overflow-hidden flex-shrink-0">
+                            <button
+                              onClick={() => setMedicalChannel(0)}
+                              disabled={isCapturing}
+                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${medicalChannel === 0 ? 'bg-[var(--accent-blue)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            >L</button>
+                            <button
+                              onClick={() => setMedicalChannel(1)}
+                              disabled={isCapturing}
+                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${medicalChannel === 1 ? 'bg-[var(--accent-blue)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            >R</button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -607,18 +630,35 @@ function LiveV2Content() {
                       />
                     </div>
                     {fireEnabled && (
-                      <Select
-                        value={fireInputDevice || ""}
-                        onChange={(e) => setFireInputDevice(e.target.value)}
-                        disabled={isCapturing}
-                      >
-                        <option value="">Select Input Device</option>
-                        {inputDevices.map((device) => (
-                          <option key={device.deviceId} value={device.deviceId}>
-                            {device.label || `Input ${device.deviceId.slice(0, 8)}`}
-                          </option>
-                        ))}
-                      </Select>
+                      <div className="flex gap-2 items-center">
+                        <Select
+                          value={fireInputDevice || ""}
+                          onChange={(e) => setFireInputDevice(e.target.value)}
+                          disabled={isCapturing}
+                          className="flex-1"
+                        >
+                          <option value="">Select Input Device</option>
+                          {inputDevices.map((device) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                            </option>
+                          ))}
+                        </Select>
+                        {fireInputDevice && (
+                          <div className="flex rounded-lg border border-[var(--accent-red)]/40 overflow-hidden flex-shrink-0">
+                            <button
+                              onClick={() => setFireChannel(0)}
+                              disabled={isCapturing}
+                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${fireChannel === 0 ? 'bg-[var(--accent-red)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            >L</button>
+                            <button
+                              onClick={() => setFireChannel(1)}
+                              disabled={isCapturing}
+                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${fireChannel === 1 ? 'bg-[var(--accent-red)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            >R</button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -633,18 +673,35 @@ function LiveV2Content() {
                       />
                     </div>
                     {allCallEnabled && (
-                      <Select
-                        value={allCallInputDevice || ""}
-                        onChange={(e) => setAllCallInputDevice(e.target.value)}
-                        disabled={isCapturing}
-                      >
-                        <option value="">Select Input Device</option>
-                        {inputDevices.map((device) => (
-                          <option key={device.deviceId} value={device.deviceId}>
-                            {device.label || `Input ${device.deviceId.slice(0, 8)}`}
-                          </option>
-                        ))}
-                      </Select>
+                      <div className="flex gap-2 items-center">
+                        <Select
+                          value={allCallInputDevice || ""}
+                          onChange={(e) => setAllCallInputDevice(e.target.value)}
+                          disabled={isCapturing}
+                          className="flex-1"
+                        >
+                          <option value="">Select Input Device</option>
+                          {inputDevices.map((device) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                              {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                            </option>
+                          ))}
+                        </Select>
+                        {allCallInputDevice && (
+                          <div className="flex rounded-lg border border-[var(--accent-purple)]/40 overflow-hidden flex-shrink-0">
+                            <button
+                              onClick={() => setAllCallChannel(0)}
+                              disabled={isCapturing}
+                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${allCallChannel === 0 ? 'bg-[var(--accent-purple)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            >L</button>
+                            <button
+                              onClick={() => setAllCallChannel(1)}
+                              disabled={isCapturing}
+                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${allCallChannel === 1 ? 'bg-[var(--accent-purple)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            >R</button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
