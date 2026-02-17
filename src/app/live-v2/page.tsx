@@ -149,6 +149,18 @@ function LiveV2Content() {
     setZonedPlayback,
     zoneScheduleEnabled,
     setZoneScheduleEnabled,
+    // Native Audio
+    nativeAudioAvailable,
+    useNativeAudio,
+    setUseNativeAudio,
+    nativeDevices,
+    medicalNativeDeviceId,
+    fireNativeDeviceId,
+    allCallNativeDeviceId,
+    setMedicalNativeDeviceId,
+    setFireNativeDeviceId,
+    setAllCallNativeDeviceId,
+    refreshNativeDevices,
   } = useSimpleMonitoring();
 
   // Safety check: ensure selectedDevices is always an array
@@ -574,12 +586,42 @@ function LiveV2Content() {
 
                 {/* Three Input Device Selection */}
                 <div className="space-y-4">
-                  <Label className="text-base font-semibold">Input Channels</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-semibold">Input Channels</Label>
+                    {nativeAudioAvailable && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[var(--text-muted)]">Native Audio</span>
+                        <Switch
+                          checked={useNativeAudio}
+                          onCheckedChange={setUseNativeAudio}
+                          disabled={isCapturing}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {useNativeAudio && nativeAudioAvailable && (
+                    <div className="p-3 rounded-lg bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/30 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-[var(--accent-green)]">CoreAudio Direct Capture</span>
+                        <button
+                          onClick={refreshNativeDevices}
+                          className="text-xs text-[var(--accent-blue)] hover:underline"
+                          disabled={isCapturing}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-muted)]">
+                        Bypasses browser stereo limitation. Each channel captured independently via PortAudio.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Medical Input */}
                   <div className="p-4 rounded-lg border border-[var(--accent-blue)]/30 bg-[var(--accent-blue)]/5 space-y-3">
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm font-semibold text-[var(--accent-blue)]">🏥 MEDICAL DEPT</Label>
+                      <Label className="text-sm font-semibold text-[var(--accent-blue)]">MEDICAL DEPT</Label>
                       <Switch
                         checked={medicalEnabled}
                         onCheckedChange={setMedicalEnabled}
@@ -588,33 +630,51 @@ function LiveV2Content() {
                     </div>
                     {medicalEnabled && (
                       <div className="flex gap-2 items-center">
-                        <Select
-                          value={medicalInputDevice || ""}
-                          onChange={(e) => setMedicalInputDevice(e.target.value)}
-                          disabled={isCapturing}
-                          className="flex-1"
-                        >
-                          <option value="">Select Input Device</option>
-                          {inputDevices.map((device) => (
-                            <option key={device.deviceId} value={device.deviceId}>
-                              {device.label || `Input ${device.deviceId.slice(0, 8)}`}
-                            </option>
-                          ))}
-                        </Select>
-                        {medicalInputDevice && (
-                          <div className="flex rounded-lg border border-[var(--accent-blue)]/40 overflow-hidden flex-shrink-0">
-                            <button
-                              onClick={() => setMedicalChannel(0)}
-                              disabled={isCapturing}
-                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${medicalChannel === 0 ? 'bg-[var(--accent-blue)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-                            >L</button>
-                            <button
-                              onClick={() => setMedicalChannel(1)}
-                              disabled={isCapturing}
-                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${medicalChannel === 1 ? 'bg-[var(--accent-blue)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-                            >R</button>
-                          </div>
+                        {useNativeAudio && nativeAudioAvailable ? (
+                          <Select
+                            value={medicalNativeDeviceId !== null ? String(medicalNativeDeviceId) : ""}
+                            onChange={(e) => setMedicalNativeDeviceId(e.target.value ? Number(e.target.value) : null)}
+                            disabled={isCapturing}
+                            className="flex-1"
+                          >
+                            <option value="">Select Native Device</option>
+                            {nativeDevices.map((device) => (
+                              <option key={device.id} value={device.id}>
+                                {device.name} ({device.maxInputChannels}ch)
+                              </option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Select
+                            value={medicalInputDevice || ""}
+                            onChange={(e) => setMedicalInputDevice(e.target.value)}
+                            disabled={isCapturing}
+                            className="flex-1"
+                          >
+                            <option value="">Select Input Device</option>
+                            {inputDevices.map((device) => (
+                              <option key={device.deviceId} value={device.deviceId}>
+                                {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                              </option>
+                            ))}
+                          </Select>
                         )}
+                        {((useNativeAudio && medicalNativeDeviceId !== null) || (!useNativeAudio && medicalInputDevice)) && (() => {
+                          const nativeDev = useNativeAudio ? nativeDevices.find(d => d.id === medicalNativeDeviceId) : null;
+                          const maxCh = nativeDev ? nativeDev.maxInputChannels : 2;
+                          return (
+                            <div className="flex rounded-lg border border-[var(--accent-blue)]/40 overflow-hidden flex-shrink-0">
+                              {Array.from({ length: maxCh }, (_, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => setMedicalChannel(i)}
+                                  disabled={isCapturing}
+                                  className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${medicalChannel === i ? 'bg-[var(--accent-blue)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                                >{maxCh <= 2 ? (i === 0 ? 'L' : 'R') : String(i + 1)}</button>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -622,7 +682,7 @@ function LiveV2Content() {
                   {/* Fire Input */}
                   <div className="p-4 rounded-lg border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/5 space-y-3">
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm font-semibold text-[var(--accent-red)]">🔥 FIRE DEPT</Label>
+                      <Label className="text-sm font-semibold text-[var(--accent-red)]">FIRE DEPT</Label>
                       <Switch
                         checked={fireEnabled}
                         onCheckedChange={setFireEnabled}
@@ -631,33 +691,51 @@ function LiveV2Content() {
                     </div>
                     {fireEnabled && (
                       <div className="flex gap-2 items-center">
-                        <Select
-                          value={fireInputDevice || ""}
-                          onChange={(e) => setFireInputDevice(e.target.value)}
-                          disabled={isCapturing}
-                          className="flex-1"
-                        >
-                          <option value="">Select Input Device</option>
-                          {inputDevices.map((device) => (
-                            <option key={device.deviceId} value={device.deviceId}>
-                              {device.label || `Input ${device.deviceId.slice(0, 8)}`}
-                            </option>
-                          ))}
-                        </Select>
-                        {fireInputDevice && (
-                          <div className="flex rounded-lg border border-[var(--accent-red)]/40 overflow-hidden flex-shrink-0">
-                            <button
-                              onClick={() => setFireChannel(0)}
-                              disabled={isCapturing}
-                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${fireChannel === 0 ? 'bg-[var(--accent-red)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-                            >L</button>
-                            <button
-                              onClick={() => setFireChannel(1)}
-                              disabled={isCapturing}
-                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${fireChannel === 1 ? 'bg-[var(--accent-red)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-                            >R</button>
-                          </div>
+                        {useNativeAudio && nativeAudioAvailable ? (
+                          <Select
+                            value={fireNativeDeviceId !== null ? String(fireNativeDeviceId) : ""}
+                            onChange={(e) => setFireNativeDeviceId(e.target.value ? Number(e.target.value) : null)}
+                            disabled={isCapturing}
+                            className="flex-1"
+                          >
+                            <option value="">Select Native Device</option>
+                            {nativeDevices.map((device) => (
+                              <option key={device.id} value={device.id}>
+                                {device.name} ({device.maxInputChannels}ch)
+                              </option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Select
+                            value={fireInputDevice || ""}
+                            onChange={(e) => setFireInputDevice(e.target.value)}
+                            disabled={isCapturing}
+                            className="flex-1"
+                          >
+                            <option value="">Select Input Device</option>
+                            {inputDevices.map((device) => (
+                              <option key={device.deviceId} value={device.deviceId}>
+                                {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                              </option>
+                            ))}
+                          </Select>
                         )}
+                        {((useNativeAudio && fireNativeDeviceId !== null) || (!useNativeAudio && fireInputDevice)) && (() => {
+                          const nativeDev = useNativeAudio ? nativeDevices.find(d => d.id === fireNativeDeviceId) : null;
+                          const maxCh = nativeDev ? nativeDev.maxInputChannels : 2;
+                          return (
+                            <div className="flex rounded-lg border border-[var(--accent-red)]/40 overflow-hidden flex-shrink-0">
+                              {Array.from({ length: maxCh }, (_, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => setFireChannel(i)}
+                                  disabled={isCapturing}
+                                  className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${fireChannel === i ? 'bg-[var(--accent-red)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                                >{maxCh <= 2 ? (i === 0 ? 'L' : 'R') : String(i + 1)}</button>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -665,7 +743,7 @@ function LiveV2Content() {
                   {/* All-Call Input */}
                   <div className="p-4 rounded-lg border border-[var(--accent-purple)]/30 bg-[var(--accent-purple)]/5 space-y-3">
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm font-semibold text-[var(--accent-purple)]">📢 ALL-CALL</Label>
+                      <Label className="text-sm font-semibold text-[var(--accent-purple)]">ALL-CALL</Label>
                       <Switch
                         checked={allCallEnabled}
                         onCheckedChange={setAllCallEnabled}
@@ -674,33 +752,51 @@ function LiveV2Content() {
                     </div>
                     {allCallEnabled && (
                       <div className="flex gap-2 items-center">
-                        <Select
-                          value={allCallInputDevice || ""}
-                          onChange={(e) => setAllCallInputDevice(e.target.value)}
-                          disabled={isCapturing}
-                          className="flex-1"
-                        >
-                          <option value="">Select Input Device</option>
-                          {inputDevices.map((device) => (
-                            <option key={device.deviceId} value={device.deviceId}>
-                              {device.label || `Input ${device.deviceId.slice(0, 8)}`}
-                            </option>
-                          ))}
-                        </Select>
-                        {allCallInputDevice && (
-                          <div className="flex rounded-lg border border-[var(--accent-purple)]/40 overflow-hidden flex-shrink-0">
-                            <button
-                              onClick={() => setAllCallChannel(0)}
-                              disabled={isCapturing}
-                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${allCallChannel === 0 ? 'bg-[var(--accent-purple)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-                            >L</button>
-                            <button
-                              onClick={() => setAllCallChannel(1)}
-                              disabled={isCapturing}
-                              className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${allCallChannel === 1 ? 'bg-[var(--accent-purple)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-                            >R</button>
-                          </div>
+                        {useNativeAudio && nativeAudioAvailable ? (
+                          <Select
+                            value={allCallNativeDeviceId !== null ? String(allCallNativeDeviceId) : ""}
+                            onChange={(e) => setAllCallNativeDeviceId(e.target.value ? Number(e.target.value) : null)}
+                            disabled={isCapturing}
+                            className="flex-1"
+                          >
+                            <option value="">Select Native Device</option>
+                            {nativeDevices.map((device) => (
+                              <option key={device.id} value={device.id}>
+                                {device.name} ({device.maxInputChannels}ch)
+                              </option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <Select
+                            value={allCallInputDevice || ""}
+                            onChange={(e) => setAllCallInputDevice(e.target.value)}
+                            disabled={isCapturing}
+                            className="flex-1"
+                          >
+                            <option value="">Select Input Device</option>
+                            {inputDevices.map((device) => (
+                              <option key={device.deviceId} value={device.deviceId}>
+                                {device.label || `Input ${device.deviceId.slice(0, 8)}`}
+                              </option>
+                            ))}
+                          </Select>
                         )}
+                        {((useNativeAudio && allCallNativeDeviceId !== null) || (!useNativeAudio && allCallInputDevice)) && (() => {
+                          const nativeDev = useNativeAudio ? nativeDevices.find(d => d.id === allCallNativeDeviceId) : null;
+                          const maxCh = nativeDev ? nativeDev.maxInputChannels : 2;
+                          return (
+                            <div className="flex rounded-lg border border-[var(--accent-purple)]/40 overflow-hidden flex-shrink-0">
+                              {Array.from({ length: maxCh }, (_, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => setAllCallChannel(i)}
+                                  disabled={isCapturing}
+                                  className={`px-2.5 py-1.5 text-xs font-bold transition-colors ${allCallChannel === i ? 'bg-[var(--accent-purple)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                                >{maxCh <= 2 ? (i === 0 ? 'L' : 'R') : String(i + 1)}</button>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

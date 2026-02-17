@@ -62,8 +62,20 @@ export interface SessionState {
   fireEnabled: boolean;
   allCallEnabled: boolean;
 
+  // Channel selection per input
+  medicalChannel: number;
+  fireChannel: number;
+  allCallChannel: number;
+
   // Zone settings (live-v2 page)
   zonedPlayback: boolean;
+  zoneScheduleEnabled: boolean;
+
+  // Native Audio (Electron + naudiodon)
+  useNativeAudio: boolean;
+  medicalNativeDeviceId: number | null;
+  fireNativeDeviceId: number | null;
+  allCallNativeDeviceId: number | null;
 
   // Day/Night mode
   dayNightMode: boolean;

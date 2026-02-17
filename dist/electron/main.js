@@ -65,6 +65,170 @@ function setupDailyTerminalClear() {
     setInterval(checkTerminalClear, 60 * 1000);
     log('Daily terminal clear scheduler started (midnight PST)');
 }
+// --- Native Audio (naudiodon) ---
+let naudiodon = null;
+// Active captures: deviceId → AudioIO instance
+const activeCaptures = new Map();
+// Per-channel accumulation buffers for 20ms batching
+const channelBuffers = new Map();
+const BATCH_INTERVAL_MS = 20;
+function loadNaudiodon() {
+    if (naudiodon)
+        return true;
+    try {
+        naudiodon = require('naudiodon2');
+        log('[NativeAudio] naudiodon loaded successfully');
+        return true;
+    }
+    catch (err) {
+        log('[NativeAudio] naudiodon not available: ' + err);
+        return false;
+    }
+}
+function setupNativeAudioIPC() {
+    electron_1.ipcMain.handle('native-audio:is-available', () => {
+        return loadNaudiodon();
+    });
+    electron_1.ipcMain.handle('native-audio:list-devices', () => {
+        if (!loadNaudiodon())
+            return [];
+        try {
+            const devices = naudiodon.getDevices();
+            return devices
+                .filter((d) => d.maxInputChannels > 0)
+                .map((d) => ({
+                id: d.id,
+                name: d.name,
+                maxInputChannels: d.maxInputChannels,
+                maxOutputChannels: d.maxOutputChannels,
+                defaultSampleRate: d.defaultSampleRate,
+                hostAPIName: d.hostAPIName,
+            }));
+        }
+        catch (err) {
+            log('[NativeAudio] Failed to list devices: ' + err);
+            return [];
+        }
+    });
+    electron_1.ipcMain.handle('native-audio:start-capture', (_event, config) => {
+        if (!loadNaudiodon())
+            return false;
+        if (activeCaptures.has(config.deviceId)) {
+            log(`[NativeAudio] Device ${config.deviceId} already capturing`);
+            return true;
+        }
+        const sampleRate = config.sampleRate || 48000;
+        const channelCount = config.channelCount;
+        try {
+            const ai = naudiodon.AudioIO({
+                inOptions: {
+                    channelCount,
+                    sampleFormat: naudiodon.SampleFormatFloat32,
+                    sampleRate,
+                    deviceId: config.deviceId,
+                    closeOnError: false,
+                },
+            });
+            // Samples per channel for ~20ms at this sample rate
+            const samplesPerBatch = Math.ceil(sampleRate * BATCH_INTERVAL_MS / 1000);
+            // Initialize per-channel buffers
+            for (let ch = 0; ch < channelCount; ch++) {
+                const key = `${config.deviceId}:${ch}`;
+                channelBuffers.set(key, []);
+            }
+            // Track accumulated sample count per channel
+            const accumulatedSamples = new Array(channelCount).fill(0);
+            ai.on('data', (buffer) => {
+                if (!mainWindow || mainWindow.isDestroyed())
+                    return;
+                // buffer is interleaved Float32 PCM: [ch0, ch1, ch2, ch3, ch0, ch1, ...]
+                const float32 = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
+                const framesInChunk = Math.floor(float32.length / channelCount);
+                // Deinterleave into per-channel arrays
+                for (let ch = 0; ch < channelCount; ch++) {
+                    const channelData = new Float32Array(framesInChunk);
+                    for (let i = 0; i < framesInChunk; i++) {
+                        channelData[i] = float32[i * channelCount + ch];
+                    }
+                    const key = `${config.deviceId}:${ch}`;
+                    const chunks = channelBuffers.get(key);
+                    if (chunks) {
+                        chunks.push(channelData);
+                        accumulatedSamples[ch] += framesInChunk;
+                    }
+                    // Flush when we've accumulated enough for ~20ms
+                    if (accumulatedSamples[ch] >= samplesPerBatch) {
+                        const allChunks = channelBuffers.get(key);
+                        if (allChunks && allChunks.length > 0) {
+                            // Merge chunks into single buffer
+                            const totalLen = allChunks.reduce((sum, c) => sum + c.length, 0);
+                            const merged = new Float32Array(totalLen);
+                            let offset = 0;
+                            for (const chunk of allChunks) {
+                                merged.set(chunk, offset);
+                                offset += chunk.length;
+                            }
+                            // Send to renderer
+                            mainWindow.webContents.send('native-audio:pcm', {
+                                deviceId: config.deviceId,
+                                channel: ch,
+                                samples: merged.buffer, // Transfer as ArrayBuffer
+                                sampleRate,
+                            });
+                            // Reset
+                            channelBuffers.set(key, []);
+                            accumulatedSamples[ch] = 0;
+                        }
+                    }
+                }
+            });
+            ai.on('error', (err) => {
+                log(`[NativeAudio] Device ${config.deviceId} error: ${err.message}`);
+            });
+            ai.start();
+            activeCaptures.set(config.deviceId, ai);
+            log(`[NativeAudio] Started capture: device=${config.deviceId}, channels=${channelCount}, rate=${sampleRate}`);
+            return true;
+        }
+        catch (err) {
+            log(`[NativeAudio] Failed to start capture on device ${config.deviceId}: ${err}`);
+            return false;
+        }
+    });
+    electron_1.ipcMain.handle('native-audio:stop-capture', (_event, deviceId) => {
+        stopCapture(deviceId);
+    });
+    electron_1.ipcMain.handle('native-audio:stop-all', () => {
+        stopAllCaptures();
+    });
+}
+function stopCapture(deviceId) {
+    const ai = activeCaptures.get(deviceId);
+    if (ai) {
+        try {
+            ai.quit(() => {
+                log(`[NativeAudio] Stopped capture: device=${deviceId}`);
+            });
+        }
+        catch (err) {
+            log(`[NativeAudio] Error stopping device ${deviceId}: ${err}`);
+        }
+        activeCaptures.delete(deviceId);
+    }
+    // Clean up channel buffers for this device
+    for (const key of channelBuffers.keys()) {
+        if (key.startsWith(`${deviceId}:`)) {
+            channelBuffers.delete(key);
+        }
+    }
+}
+function stopAllCaptures() {
+    for (const deviceId of activeCaptures.keys()) {
+        stopCapture(deviceId);
+    }
+    log('[NativeAudio] All captures stopped');
+}
+// --- End Native Audio ---
 function createWindow() {
     mainWindow = new electron_1.BrowserWindow({
         width: 1400,
@@ -73,6 +237,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             webSecurity: true,
+            preload: path_1.default.join(__dirname, 'preload.js'),
         },
         title: 'AlgoSound - Fire Station Alert System',
     });
@@ -108,6 +273,8 @@ electron_1.app.whenReady().then(async () => {
                 log('Failed to request microphone access: ' + err);
             }
         }
+        // Setup native audio IPC handlers
+        setupNativeAudioIPC();
         // Start Next.js server
         log('Starting Next.js server...');
         await (0, server_1.startNextServer)();
@@ -135,5 +302,6 @@ electron_1.app.on('window-all-closed', () => {
     }
 });
 electron_1.app.on('before-quit', () => {
+    stopAllCaptures();
     (0, server_1.stopNextServer)();
 });

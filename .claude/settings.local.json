@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(grep:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:developercommunity.visualstudio.com)",
+      "WebFetch(domain:community.latenode.com)",
+      "Bash(./node_modules/.bin/tsc:*)"
+    ]
+  }
+}

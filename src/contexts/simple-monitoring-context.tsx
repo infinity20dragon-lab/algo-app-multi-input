@@ -105,6 +105,19 @@ interface SimpleMonitoringContextType {
   zoneScheduleEnabled: boolean;
   setZoneScheduleEnabled: (enabled: boolean) => void;
 
+  // Native Audio (Electron + naudiodon)
+  nativeAudioAvailable: boolean;
+  useNativeAudio: boolean;
+  setUseNativeAudio: (enabled: boolean) => void;
+  nativeDevices: Array<{ id: number; name: string; maxInputChannels: number; defaultSampleRate: number; hostAPIName: string }>;
+  medicalNativeDeviceId: number | null;
+  fireNativeDeviceId: number | null;
+  allCallNativeDeviceId: number | null;
+  setMedicalNativeDeviceId: (id: number | null) => void;
+  setFireNativeDeviceId: (id: number | null) => void;
+  setAllCallNativeDeviceId: (id: number | null) => void;
+  refreshNativeDevices: () => Promise<void>;
+
   // Emulation
   emulationMode: boolean;
   emulationNetworkDelay: number;
@@ -252,6 +265,14 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const [zonedPlayback, setZonedPlayback] = useState(false);
   const [zoneScheduleEnabled, setZoneScheduleEnabled] = useState(false);
 
+  // Native Audio (Electron + naudiodon)
+  const [nativeAudioAvailable, setNativeAudioAvailable] = useState(false);
+  const [useNativeAudio, setUseNativeAudio] = useState(false);
+  const [nativeDevices, setNativeDevices] = useState<Array<{ id: number; name: string; maxInputChannels: number; defaultSampleRate: number; hostAPIName: string }>>([]);
+  const [medicalNativeDeviceId, setMedicalNativeDeviceId] = useState<number | null>(null);
+  const [fireNativeDeviceId, setFireNativeDeviceId] = useState<number | null>(null);
+  const [allCallNativeDeviceId, setAllCallNativeDeviceId] = useState<number | null>(null);
+
   // Emulation
   const [emulationMode, setEmulationMode] = useState(false);
   const [emulationNetworkDelay, setEmulationNetworkDelay] = useState(0);
@@ -264,6 +285,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const streamRef = useRef<MediaStream | null>(null);
   const linkedSpeakersRef = useRef<any[]>([]);
   const splitContextRef = useRef<AudioContext | null>(null);
+  // Native audio bridge refs
+  const nativeBridgeContextRef = useRef<AudioContext | null>(null);
+  const nativePcmUnsubRef = useRef<(() => void) | null>(null);
 
   // Update recorder's playback volume when it changes
   useEffect(() => {
@@ -271,6 +295,37 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       recorderRef.current.setPlaybackVolume(playbackVolume);
     }
   }, [playbackVolume]);
+
+  // Detect native audio availability on mount
+  useEffect(() => {
+    const detect = async () => {
+      try {
+        if (window.nativeAudio) {
+          const available = await window.nativeAudio.isAvailable();
+          setNativeAudioAvailable(available);
+          if (available) {
+            const devs = await window.nativeAudio.listDevices();
+            setNativeDevices(devs);
+            console.log('[NativeAudio] Available. Devices:', devs.length);
+          }
+        }
+      } catch {
+        setNativeAudioAvailable(false);
+      }
+    };
+    detect();
+  }, []);
+
+  // Refresh native device list
+  const refreshNativeDevices = useCallback(async () => {
+    if (!window.nativeAudio) return;
+    try {
+      const devs = await window.nativeAudio.listDevices();
+      setNativeDevices(devs);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Load zones + zone routing from Firebase (user-scoped — only this user's zones)
   useEffect(() => {
@@ -376,6 +431,12 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     // Load zone settings
     if (sessionState.zonedPlayback !== undefined) setZonedPlayback(sessionState.zonedPlayback);
     if (sessionState.zoneScheduleEnabled !== undefined) setZoneScheduleEnabled(sessionState.zoneScheduleEnabled);
+
+    // Load native audio settings
+    if (sessionState.useNativeAudio !== undefined) setUseNativeAudio(sessionState.useNativeAudio);
+    if (sessionState.medicalNativeDeviceId !== undefined) setMedicalNativeDeviceId(sessionState.medicalNativeDeviceId);
+    if (sessionState.fireNativeDeviceId !== undefined) setFireNativeDeviceId(sessionState.fireNativeDeviceId);
+    if (sessionState.allCallNativeDeviceId !== undefined) setAllCallNativeDeviceId(sessionState.allCallNativeDeviceId);
   }, [sessionState]);
 
   // Sync settings to RTDB when they change
@@ -424,6 +485,10 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       allCallChannel,
       zonedPlayback,
       zoneScheduleEnabled,
+      useNativeAudio,
+      medicalNativeDeviceId,
+      fireNativeDeviceId,
+      allCallNativeDeviceId,
     });
   }, [
     selectedDevices,
@@ -438,8 +503,40 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     medicalEnabled, fireEnabled, allCallEnabled,
     medicalChannel, fireChannel, allCallChannel,
     zonedPlayback, zoneScheduleEnabled,
+    useNativeAudio, medicalNativeDeviceId, fireNativeDeviceId, allCallNativeDeviceId,
     syncSessionState,
   ]);
+
+  // Create a synthetic MediaStream from native audio IPC for a specific device+channel
+  const createNativeMediaStream = async (
+    nativeDeviceId: number,
+    channel: number,
+    ctx: AudioContext
+  ): Promise<MediaStream> => {
+    // Load the pcm-bridge worklet
+    await ctx.audioWorklet.addModule('/audio/pcm-bridge.worklet.js');
+    const bridgeNode = new AudioWorkletNode(ctx, 'pcm-bridge', {
+      outputChannelCount: [1],
+    });
+    const dest = ctx.createMediaStreamDestination();
+    bridgeNode.connect(dest);
+
+    // Subscribe to IPC PCM data for this device+channel
+    const unsub = window.nativeAudio!.onPCM((data) => {
+      if (data.deviceId === nativeDeviceId && data.channel === channel) {
+        bridgeNode.port.postMessage({ samples: data.samples });
+      }
+    });
+
+    // Store unsubscriber for cleanup
+    const prevUnsub = nativePcmUnsubRef.current;
+    nativePcmUnsubRef.current = () => {
+      unsub();
+      if (prevUnsub) prevUnsub();
+    };
+
+    return dest.stream;
+  };
 
   // Start monitoring
   const startMonitoring = useCallback(async () => {
@@ -452,7 +549,69 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       let fireStream: MediaStream | null = null;
       let allCallStream: MediaStream | null = null;
 
-      if (multiInputMode) {
+      console.log('[startMonitoring] Native audio check:', { multiInputMode, useNativeAudio, nativeAudioAvailable, medicalNativeDeviceId, fireNativeDeviceId, allCallNativeDeviceId });
+
+      if (multiInputMode && useNativeAudio && nativeAudioAvailable) {
+        // === NATIVE AUDIO PATH (Electron + naudiodon) ===
+        addLog('Using native audio capture (naudiodon)...', 'info');
+
+        const bridgeCtx = new AudioContext({ sampleRate: 48000 });
+        nativeBridgeContextRef.current = bridgeCtx;
+
+        // Determine which native devices to capture and their channel counts
+        const devicesToCapture = new Map<number, number>(); // deviceId → channelCount needed
+
+        if (medicalEnabled && medicalNativeDeviceId !== null) {
+          const dev = nativeDevices.find(d => d.id === medicalNativeDeviceId);
+          if (dev) {
+            const needed = Math.max(devicesToCapture.get(dev.id) || 0, medicalChannel + 1);
+            devicesToCapture.set(dev.id, Math.min(needed, dev.maxInputChannels));
+          }
+        }
+        if (fireEnabled && fireNativeDeviceId !== null) {
+          const dev = nativeDevices.find(d => d.id === fireNativeDeviceId);
+          if (dev) {
+            const needed = Math.max(devicesToCapture.get(dev.id) || 0, fireChannel + 1);
+            devicesToCapture.set(dev.id, Math.min(needed, dev.maxInputChannels));
+          }
+        }
+        if (allCallEnabled && allCallNativeDeviceId !== null) {
+          const dev = nativeDevices.find(d => d.id === allCallNativeDeviceId);
+          if (dev) {
+            const needed = Math.max(devicesToCapture.get(dev.id) || 0, allCallChannel + 1);
+            devicesToCapture.set(dev.id, Math.min(needed, dev.maxInputChannels));
+          }
+        }
+
+        // Start native captures
+        for (const [deviceId, channelCount] of devicesToCapture) {
+          const ok = await window.nativeAudio!.startCapture({ deviceId, channelCount, sampleRate: 48000 });
+          if (!ok) {
+            throw new Error(`Failed to start native capture on device ${deviceId}`);
+          }
+          const dev = nativeDevices.find(d => d.id === deviceId);
+          addLog(`Native capture started: ${dev?.name || deviceId} (${channelCount}ch)`, 'info');
+        }
+
+        // Create synthetic MediaStreams via pcm-bridge worklet
+        if (medicalEnabled && medicalNativeDeviceId !== null) {
+          medicalStream = await createNativeMediaStream(medicalNativeDeviceId, medicalChannel, bridgeCtx);
+        }
+        if (fireEnabled && fireNativeDeviceId !== null) {
+          fireStream = await createNativeMediaStream(fireNativeDeviceId, fireChannel, bridgeCtx);
+        }
+        if (allCallEnabled && allCallNativeDeviceId !== null) {
+          allCallStream = await createNativeMediaStream(allCallNativeDeviceId, allCallChannel, bridgeCtx);
+        }
+
+        const enabledCount = [medicalStream, fireStream, allCallStream].filter(s => s !== null).length;
+        addLog(`Native audio: ${enabledCount} stream(s) bridged to Web Audio`, 'info');
+
+        if (enabledCount === 0) {
+          throw new Error('At least one native input must be enabled with a device selected');
+        }
+      } else if (multiInputMode) {
+        // === BROWSER getUserMedia PATH (fallback) ===
         // Helper: extract a single channel from a stereo stream
         const extractChannel = (stereoStream: MediaStream, channelIndex: number, ctx: AudioContext): MediaStream => {
           const source = ctx.createMediaStreamSource(stereoStream);
@@ -481,7 +640,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
           medicalStream = extractChannel(rawStream, medicalChannel, splitCtx);
           fireStream = extractChannel(rawStream, fireChannel, splitCtx);
           const devName = devices.find(d => d.id === medicalInputDevice)?.name || 'shared device';
-          addLog(`🔀 Shared capture: ${devName} → Medical(${medicalChannel === 0 ? 'L' : 'R'}) + Fire(${fireChannel === 0 ? 'L' : 'R'})`, 'info');
+          addLog(`Shared capture: ${devName} → Medical(${medicalChannel === 0 ? 'L' : 'R'}) + Fire(${fireChannel === 0 ? 'L' : 'R'})`, 'info');
         } else {
           // Independent captures
           const streamPromises: Promise<MediaStream | null>[] = [];
@@ -537,7 +696,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         }
 
         const enabledCount = [medicalStream, fireStream, allCallStream].filter(s => s !== null).length;
-        addLog(`✓ ${enabledCount} input stream(s) acquired`, 'info');
+        addLog(`${enabledCount} input stream(s) acquired`, 'info');
 
         if (enabledCount === 0) {
           throw new Error('At least one input must be enabled with a device selected');
@@ -781,7 +940,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       console.error('Failed to start monitoring:', error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInputDevice, batchDuration, silenceTimeout, playbackDelay, hardwareGracePeriod, saveRecording, devices, selectedDevices, audioThreshold, emulationMode, emulationNetworkDelay, medicalInputDevice, fireInputDevice, allCallInputDevice, medicalEnabled, fireEnabled, allCallEnabled, medicalChannel, fireChannel, allCallChannel]);
+  }, [selectedInputDevice, batchDuration, silenceTimeout, playbackDelay, hardwareGracePeriod, saveRecording, devices, selectedDevices, audioThreshold, emulationMode, emulationNetworkDelay, medicalInputDevice, fireInputDevice, allCallInputDevice, medicalEnabled, fireEnabled, allCallEnabled, medicalChannel, fireChannel, allCallChannel, useNativeAudio, nativeAudioAvailable, medicalNativeDeviceId, fireNativeDeviceId, allCallNativeDeviceId]);
 
   // Stop monitoring
   const stopMonitoring = useCallback(async () => {
@@ -803,9 +962,22 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         splitContextRef.current = null;
       }
 
+      // Clean up native audio
+      if (nativePcmUnsubRef.current) {
+        nativePcmUnsubRef.current();
+        nativePcmUnsubRef.current = null;
+      }
+      if (nativeBridgeContextRef.current) {
+        nativeBridgeContextRef.current.close();
+        nativeBridgeContextRef.current = null;
+      }
+      if (window.nativeAudio) {
+        window.nativeAudio.stopAllCaptures().catch(() => {});
+      }
+
       linkedSpeakersRef.current = [];
       setIsMonitoring(false);
-      addLog('✅ Monitoring stopped', 'info');
+      addLog('Monitoring stopped', 'info');
 
     } catch (error) {
       addLog(`Failed to stop: ${error}`, 'error');
@@ -1090,6 +1262,19 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     setZonedPlayback,
     zoneScheduleEnabled,
     setZoneScheduleEnabled,
+
+    // Native Audio
+    nativeAudioAvailable,
+    useNativeAudio,
+    setUseNativeAudio,
+    nativeDevices,
+    medicalNativeDeviceId,
+    fireNativeDeviceId,
+    allCallNativeDeviceId,
+    setMedicalNativeDeviceId,
+    setFireNativeDeviceId,
+    setAllCallNativeDeviceId,
+    refreshNativeDevices,
 
     // Emulation
     emulationMode,

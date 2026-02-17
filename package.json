@@ -12,19 +12,22 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && npm run electron:compile && cross-env NODE_ENV=development electron .\"",
     "electron:build": "npm run build && npm run electron:compile && electron-builder",
     "electron:build:win": "npm run build && npm run electron:compile && electron-builder --win",
-    "electron:start": "electron ."
+    "electron:start": "electron .",
+    "electron:rebuild": "electron-rebuild -f -w naudiodon2"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "firebase": "^12.7.0",
     "lamejs": "^1.2.1",
     "lucide-react": "^0.562.0",
+    "naudiodon2": "^2.5.0",
     "next": "^16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20.19.27",
     "@types/react": "^19",
