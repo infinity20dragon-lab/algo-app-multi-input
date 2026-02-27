@@ -3,14 +3,13 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect } from "react";
 import { useAudioCapture } from "@/hooks/useAudioCapture";
 import type { AlgoDevice, PoEDevice } from "@/lib/algo/types";
-import { storage, realtimeDb } from "@/lib/firebase/config";
+import { storage } from "@/lib/firebase/config";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
-import { ref as dbRef, set, push } from "firebase/database";
 import { useAuth } from "@/contexts/auth-context";
 import { getIdleVolumeString, getAlwaysKeepPagingOn } from "@/lib/settings";
 import { CallCoordinator, CallState } from "@/lib/call-coordinator";
 import { BatchCoordinator, type BatchCoordinatorConfig } from "@/lib/batch-coordinator";
-import { addRecording } from "@/lib/firebase/firestore";
+import { addRecording, addActivityLog } from "@/lib/firebase/firestore";
 
 // Debug mode - set to false for production to reduce console noise
 const DEBUG_MODE = process.env.NODE_ENV === 'development';
@@ -445,15 +444,13 @@ export function AudioMonitoringProvider({ children }: { children: React.ReactNod
       return newLogs;
     });
 
-    // Write to Firebase Realtime Database (including admin users)
+    // Write to Firestore
     if (user) {
-      const logRef = dbRef(realtimeDb, `logs/${user.uid}/${dateKey}`);
-      const newLogRef = push(logRef);
-
-      set(newLogRef, {
+      addActivityLog({
         timestamp,
+        dateKey,
         type: logEntry.type,
-        message: logEntry.message, // Already has [email] prefix
+        message: logEntry.message,
         userId: user.uid,
         userEmail: userEmail,
         audioLevel: logEntry.audioLevel ?? null,
@@ -462,7 +459,7 @@ export function AudioMonitoringProvider({ children }: { children: React.ReactNod
         volume: logEntry.volume ?? null,
         recordingUrl: logEntry.recordingUrl ?? null,
       }).catch(error => {
-        console.error('[AudioLog] Failed to write log to Firebase:', error);
+        console.error('[AudioLog] Failed to write log to Firestore:', error);
       });
     }
   }, [loggingEnabled, user]);

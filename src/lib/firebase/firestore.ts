@@ -12,6 +12,7 @@ import {
   orderBy,
   Timestamp,
   type DocumentData,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "./config";
 import type { AlgoDevice, Zone, AudioFile, DistributionLog, ZoneRouting, PoESwitch, PoEDevice, Recording } from "@/lib/algo/types";
@@ -448,6 +449,73 @@ export async function getRecordingDateKeys(userId: string): Promise<string[]> {
   });
 
   return Array.from(dateKeys);
+}
+
+// ============ Activity Logs ============
+
+const logsCollection = collection(db, "logs");
+
+export interface ActivityLogEntry {
+  id?: string;
+  timestamp: string;
+  dateKey: string;
+  type: "audio_detected" | "audio_silent" | "speakers_enabled" | "speakers_disabled" | "volume_change" | "system";
+  message: string;
+  userId: string;
+  userEmail?: string | null;
+  audioLevel?: number | null;
+  audioThreshold?: number | null;
+  speakersEnabled?: boolean | null;
+  volume?: number | null;
+  recordingUrl?: string | null;
+  createdAt?: Date;
+}
+
+export async function addActivityLog(
+  logEntry: Omit<ActivityLogEntry, "id" | "createdAt">
+): Promise<string> {
+  const docRef = await addDoc(logsCollection, {
+    ...logEntry,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+}
+
+export async function getActivityLogsByDate(
+  userId: string,
+  dateKey: string
+): Promise<ActivityLogEntry[]> {
+  const q = query(
+    logsCollection,
+    where("userId", "==", userId),
+    where("dateKey", "==", dateKey),
+    orderBy("createdAt", "asc")
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...convertTimestamps(doc.data()),
+  })) as ActivityLogEntry[];
+}
+
+export async function deleteActivityLogsByDate(
+  userId: string,
+  dateKey: string
+): Promise<void> {
+  const q = query(
+    logsCollection,
+    where("userId", "==", userId),
+    where("dateKey", "==", dateKey)
+  );
+  const snapshot = await getDocs(q);
+
+  const batchSize = 500;
+  for (let i = 0; i < snapshot.docs.length; i += batchSize) {
+    const batch = writeBatch(db);
+    const chunk = snapshot.docs.slice(i, i + batchSize);
+    chunk.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
 }
 
 // ============ Helpers ============

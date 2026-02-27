@@ -10,10 +10,9 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { SimpleRecorder } from "@/lib/simple-recorder";
 import { useAuth } from "./auth-context";
 import { useRealtimeSync } from "./realtime-sync-context";
-import { ref as dbRef, push, set } from "firebase/database";
-import { realtimeDb, storage } from "@/lib/firebase/config";
+import { storage } from "@/lib/firebase/config";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
-import { addRecording, getZones, getUserZoneRouting } from "@/lib/firebase/firestore";
+import { addRecording, getZones, getUserZoneRouting, addActivityLog } from "@/lib/firebase/firestore";
 import type { Zone, ZoneRouting } from "@/lib/algo/types";
 
 // TODO: Import proper types
@@ -411,7 +410,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     // Load recording/playback settings
     if (sessionState.saveRecording !== undefined) setSaveRecording(sessionState.saveRecording);
     if (sessionState.loggingEnabled !== undefined) setLoggingEnabled(sessionState.loggingEnabled);
-    if (sessionState.playbackEnabled !== undefined) setPlaybackEnabled(sessionState.playbackEnabled);
+    // playbackEnabled is always true in current version - ignore stale session values
 
     // Load emulation settings
     if (sessionState.emulationMode !== undefined) setEmulationMode(sessionState.emulationMode);
@@ -866,6 +865,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
           setPlaybackAudioLevel(level);
         },
         setSpeakerZoneIP: setSpeakersZoneIP,
+        controlPoEDevices,
         setSpeakerVolume: async (speakerId: string, volumePercent: number) => {
           // 🧪 EMULATION MODE: Skip API calls
           if (emulationMode) {
@@ -1045,46 +1045,80 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     let eventType: string | null = null;
     let cleanMessage = message;
 
+    // Extract channel name from multi-input messages like "[MEDICAL]", "[FIRE]", "[ALLCALL]"
+    const channelMatch = message.match(/\[(MEDICAL|FIRE|ALLCALL)\]/);
+    const channel = channelMatch
+      ? channelMatch[1] === 'ALLCALL' ? 'All-Call'
+        : channelMatch[1] === 'MEDICAL' ? 'Medical'
+        : 'Fire'
+      : null;
+
     if (message.includes('VOICE DETECTED')) {
       eventType = 'audio_detected';
       cleanMessage = 'Voice detected';
-    } else if (message.includes('NEW SESSION CREATED')) {
+    } else if (message.includes('NEW SESSION CREATED') || message.includes('NEW SESSION:')) {
       eventType = 'system';
-      cleanMessage = 'Session started';
-    } else if (message.includes('SESSION CLOSED')) {
+      cleanMessage = channel ? `Session started (${channel})` : 'Session started';
+    } else if (message.includes('SESSION CLOSED') || message.includes('Silence timeout')) {
       eventType = 'audio_silent';
-      cleanMessage = 'Session ended (silence timeout)';
+      cleanMessage = channel ? `Session ended (${channel})` : 'Session ended (silence timeout)';
     } else if (message.includes('HARDWARE ACTIVATION COMPLETE')) {
       eventType = 'speakers_enabled';
       cleanMessage = 'Speakers activated';
     } else if (message.includes('HARDWARE DEACTIVATION COMPLETE')) {
       eventType = 'speakers_disabled';
       cleanMessage = 'Speakers deactivated';
-    } else if (message.includes('SAVE COMPLETE')) {
+    } else if (message.includes('SAVE COMPLETE') || message.includes('Session saved')) {
       eventType = 'system';
-      cleanMessage = 'Recording saved';
-    } else if (message.includes('Uploading:')) {
+      cleanMessage = channel ? `Recording saved (${channel})` : 'Recording saved';
+    } else if (message.includes('Recording started')) {
       eventType = 'system';
-      const match = message.match(/Uploading: (.+)/);
-      cleanMessage = match ? `Uploading ${match[1]}` : 'Uploading recording';
+      cleanMessage = channel ? `Recording started (${channel})` : 'Recording started';
+    } else if (message.includes('Saving session:')) {
+      eventType = 'system';
+      const fileMatch = message.match(/Saving session: (.+)/);
+      const filename = fileMatch ? fileMatch[1] : 'unknown';
+      cleanMessage = channel ? `Saving ${channel}: ${filename}` : `Saving: ${filename}`;
+    } else if (message.includes('Upload complete:')) {
+      eventType = 'system';
+      const fileMatch = message.match(/Upload complete: (.+)/);
+      cleanMessage = fileMatch ? `Upload complete: ${fileMatch[1]}` : 'Upload complete';
+    } else if (message.includes('Uploading')) {
+      eventType = 'system';
+      const fileMatch = message.match(/Uploading (.+?)(?:\s*\(|\.\.\.)/);
+      cleanMessage = fileMatch ? `Uploading: ${fileMatch[1]}` : 'Uploading recording';
     } else if (message.includes('Monitoring started')) {
       eventType = 'system';
       cleanMessage = 'Monitoring started';
     } else if (message.includes('Monitoring stopped')) {
       eventType = 'system';
       cleanMessage = 'Monitoring stopped';
+    } else if (message.includes('deactivating hardware') || message.includes('All idle conditions met')) {
+      eventType = 'speakers_disabled';
+      cleanMessage = 'Hardware deactivated (idle)';
+    } else if (message.includes('PoE:') || message.includes('PoE ')) {
+      // PoE device events: "PoE: ON — light1", "PoE device1 failed", etc.
+      if (message.includes('ON')) {
+        eventType = 'speakers_enabled';
+      } else if (message.includes('OFF')) {
+        eventType = 'speakers_disabled';
+      } else {
+        eventType = 'system';
+      }
+      cleanMessage = message.replace(/^[^\w]*/, ''); // Strip leading emojis
     }
 
     if (!eventType) return; // Not a key event — skip Firebase write
 
-    const logRef = dbRef(realtimeDb, `logs/${user.uid}/${dateKey}`);
-    const newLogRef = push(logRef);
-    set(newLogRef, {
+    addActivityLog({
       timestamp,
-      type: eventType,
+      dateKey,
+      type: eventType as "audio_detected" | "audio_silent" | "speakers_enabled" | "speakers_disabled" | "volume_change" | "system",
       message: cleanMessage,
+      userId: user.uid,
+      userEmail: user.email || null,
     }).catch((error) => {
-      console.error('[SimpleMonitoring] Failed to write log to Firebase:', error);
+      console.error('[SimpleMonitoring] Failed to write log to Firestore:', error);
     });
   }, [user, loggingEnabled]);
 
@@ -1142,7 +1176,52 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
   }, [emulationMode, addLog]);
 
-  // Emergency Controls — speakers only, never paging device
+  // Control PoE devices (lights, etc.) — auto mode only, linked to active paging devices
+  const controlPoEDevices = useCallback(async (enable: boolean) => {
+    if (emulationMode) {
+      addLog(`🧪 EMULATION: Simulated ${enable ? 'enabling' : 'disabling'} PoE devices`, 'info');
+      return;
+    }
+
+    // Get PoE devices in auto mode
+    const autoPoEDevices = poeDevices.filter((d: any) => d.mode === 'auto');
+    if (autoPoEDevices.length === 0) return;
+
+    // Get active paging devices (8301) from selected devices
+    const activePagingDeviceIds = selectedDevices.filter(deviceId => {
+      const device = devices.find((d: any) => d.id === deviceId);
+      return device && device.type === '8301';
+    });
+
+    // Filter: only control devices linked to an active paging device
+    const eligiblePoEDevices = autoPoEDevices.filter((poeDevice: any) => {
+      if (!poeDevice.linkedPagingDeviceIds || poeDevice.linkedPagingDeviceIds.length === 0) return false;
+      return poeDevice.linkedPagingDeviceIds.some((linkedId: string) => activePagingDeviceIds.includes(linkedId));
+    });
+
+    if (eligiblePoEDevices.length === 0) return;
+
+    addLog(`💡 PoE: ${enable ? 'ON' : 'OFF'} — ${eligiblePoEDevices.map((d: any) => d.name).join(', ')}`, 'info');
+
+    const promises = eligiblePoEDevices.map(async (device: any) => {
+      try {
+        const response = await fetch('/api/poe/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deviceId: device.id, enabled: enable }),
+        });
+        if (!response.ok) {
+          addLog(`⚠️ PoE ${device.name} failed: HTTP ${response.status}`, 'warning');
+        }
+      } catch (error) {
+        addLog(`⚠️ PoE ${device.name} error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
+      }
+    });
+
+    await Promise.allSettled(promises);
+  }, [poeDevices, selectedDevices, devices, emulationMode, addLog]);
+
+  // Emergency Controls — speakers and PoE devices
   const emergencyKillAll = useCallback(async () => {
     const speakers = linkedSpeakersRef.current;
     if (speakers.length === 0) {
@@ -1151,7 +1230,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
     addLog(`🚨 EMERGENCY: Muting all ${speakers.length} speakers (idle zone)...`, 'warning');
     await setSpeakersZoneIP(speakers, '224.0.2.60:50022');
-  }, [setSpeakersZoneIP, addLog]);
+    await controlPoEDevices(false);
+  }, [setSpeakersZoneIP, controlPoEDevices, addLog]);
 
   const emergencyEnableAll = useCallback(async () => {
     const speakers = linkedSpeakersRef.current;
@@ -1161,7 +1241,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
     addLog(`✅ EMERGENCY: Enabling all ${speakers.length} speakers (active receiver zone)...`, 'info');
     await setSpeakersZoneIP(speakers, '224.0.2.60:50002');
-  }, [setSpeakersZoneIP, addLog]);
+    await controlPoEDevices(true);
+  }, [setSpeakersZoneIP, controlPoEDevices, addLog]);
 
   const controlSingleSpeaker = useCallback(async (speakerId: string, enable: boolean) => {
     const speakers = linkedSpeakersRef.current;

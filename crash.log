@@ -1,0 +1,82 @@
+PID 39916 received SIGSEGV for address: 0xf64d804a
+SymInit: Symbol-SearchPath: '.;G:\files\documents\webdev\algo-app;G:\files\documents\webdev\algo-app\node_modules\electron\dist;C:\WINDOWS;C:\WINDOWS\system32;SRV*C:\websymbols*http://msdl.microsoft.com/download/symbols;', symOptions: 530, UserName: 'Administrator'
+OS-Version: 10.0.26100 () 0x100-0x1
+G:\files\documents\webdev\algo-app\node_modules\segfault-handler\src\StackWalker.cpp (941): StackWalker::ShowCallstack
+G:\files\documents\webdev\algo-app\node_modules\segfault-handler\src\segfault-handler.cpp (242): segfault_handler
+00007FF9F8A52D26 (ntdll): (filename not available): RtlLocateExtendedFeature
+00007FF9F8A520F6 (ntdll): (filename not available): RtlLocateExtendedFeature
+00007FF9F8A4A961 (ntdll): (filename not available): RtlRaiseException
+00007FF9F64D804A (KERNELBASE): (filename not available): RaiseException
+00007FF9F750B6B4 (RPCRT4): (filename not available): I_RpcRequestMutex
+00007FF9F749BBE4 (RPCRT4): (filename not available): RpcRaiseException
+00007FF9F75680C0 (RPCRT4): (filename not available): NdrClientCall3
+00007FF9F75675FD (RPCRT4): (filename not available): NdrClientCall3
+00007FF9F5428B57 (WINSTA): (filename not available): WinStationIsSessionRemoteable
+00007FF9F5429206 (WINSTA): (filename not available): WinStationIsSessionRemoteable
+00007FF9F5434F7B (WINSTA): (filename not available): WinStationQueryInformationW
+00007FF9F5434A15 (WINSTA): (filename not available): WinStationPreCreateGlassReplacementSession
+00007FF9F5434CB9 (WINSTA): (filename not available): WinStationQueryInformationW
+00007FF9F2C82C59 (WTSAPI32): (filename not available): WTSQuerySessionInformationW
+00007FF6FCB2CCA0 (electron): (filename not available): Cr_z_uncompress
+00007FF6FCB2CDA4 (electron): (filename not available): Cr_z_uncompress
+00007FF6FB56F75E (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF6FBEFA920 (electron): (filename not available): uv_os_getpid
+00007FF6FE776940 (electron): (filename not available): v8::internal::compiler::CompilationDependencies::FieldTypeDependencyOffTheRecord
+00007FF6FE77123A (electron): (filename not available): v8::internal::compiler::CompilationDependencies::FieldTypeDependencyOffTheRecord
+00007FF6FE74A71D (electron): (filename not available): v8::internal::compiler::CompilationDependencies::FieldTypeDependencyOffTheRecord
+00007FF6FBEDE951 (electron): (filename not available): uv_os_getpid
+00007FF6FBF184CE (electron): (filename not available): uv_os_getpid
+00007FF6FBF2E05F (electron): (filename not available): uv_os_getpid
+00007FF6FB379282 (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF6FB37AF21 (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF6FB37656F (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF6FA60A3CB (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF6FA60B522 (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF6FA60B33A (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF6FA609BAF (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF6FA609D5D (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF6F9F7B618 (electron): (filename not available): node::FreePlatform
+00007FF6FEE10602 (electron): (filename not available): Cr_z_crc32_z
+00007FF9F6CBE8D7 (KERNEL32): (filename not available): BaseThreadInitThunk
+00007FF9F8ACC53C (ntdll): (filename not available): RtlUserThreadStart
+PID 20824 received SIGSEGV for address: 0x135f804a
+SymInit: Symbol-SearchPath: '.;G:\files\documents\webdev\algo-app;G:\files\documents\webdev\algo-app\node_modules\electron\dist;C:\WINDOWS;C:\WINDOWS\system32;SRV*C:\websymbols*http://msdl.microsoft.com/download/symbols;', symOptions: 530, UserName: 'Administrator'
+OS-Version: 10.0.26100 () 0x100-0x1
+G:\files\documents\webdev\algo-app\node_modules\segfault-handler\src\StackWalker.cpp (941): StackWalker::ShowCallstack
+G:\files\documents\webdev\algo-app\node_modules\segfault-handler\src\segfault-handler.cpp (242): segfault_handler
+00007FFC16052D26 (ntdll): (filename not available): RtlLocateExtendedFeature
+00007FFC160520F6 (ntdll): (filename not available): RtlLocateExtendedFeature
+00007FFC1604A961 (ntdll): (filename not available): RtlRaiseException
+00007FFC135F804A (KERNELBASE): (filename not available): RaiseException
+00007FFC1431B6B4 (RPCRT4): (filename not available): I_RpcRequestMutex
+00007FFC142ABBE4 (RPCRT4): (filename not available): RpcRaiseException
+00007FFC143780C0 (RPCRT4): (filename not available): NdrClientCall3
+00007FFC143775FD (RPCRT4): (filename not available): NdrClientCall3
+00007FFC12A18B57 (WINSTA): (filename not available): WinStationIsSessionRemoteable
+00007FFC12A19206 (WINSTA): (filename not available): WinStationIsSessionRemoteable
+00007FFC12A24F7B (WINSTA): (filename not available): WinStationQueryInformationW
+00007FFC12A24A15 (WINSTA): (filename not available): WinStationPreCreateGlassReplacementSession
+00007FFC12A24CB9 (WINSTA): (filename not available): WinStationQueryInformationW
+00007FFC10282C59 (WTSAPI32): (filename not available): WTSQuerySessionInformationW
+00007FF7BD48CCA0 (electron): (filename not available): Cr_z_uncompress
+00007FF7BD48CDA4 (electron): (filename not available): Cr_z_uncompress
+00007FF7BBECF75E (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF7BC85A920 (electron): (filename not available): uv_os_getpid
+00007FF7BF0D6940 (electron): (filename not available): v8::internal::compiler::CompilationDependencies::FieldTypeDependencyOffTheRecord
+00007FF7BF0D123A (electron): (filename not available): v8::internal::compiler::CompilationDependencies::FieldTypeDependencyOffTheRecord
+00007FF7BF0AA71D (electron): (filename not available): v8::internal::compiler::CompilationDependencies::FieldTypeDependencyOffTheRecord
+00007FF7BC83E951 (electron): (filename not available): uv_os_getpid
+00007FF7BC8784CE (electron): (filename not available): uv_os_getpid
+00007FF7BC88E05F (electron): (filename not available): uv_os_getpid
+00007FF7BBCD9282 (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF7BBCDAF21 (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF7BBCD656F (electron): (filename not available): v8::internal::compiler::CompilationDependencies::DependOnInitialMapInstanceSizePrediction
+00007FF7BAF6A3CB (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF7BAF6B522 (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF7BAF6B33A (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF7BAF69BAF (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF7BAF69D5D (electron): (filename not available): std::__Cr::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >::vector<v8::CpuProfileDeoptFrame,std::__Cr::allocator<v8::CpuProfileDeoptFrame> >
+00007FF7BA8DB618 (electron): (filename not available): node::FreePlatform
+00007FF7BF770602 (electron): (filename not available): Cr_z_crc32_z
+00007FFC1507E8D7 (KERNEL32): (filename not available): BaseThreadInitThunk
+00007FFC160CC53C (ntdll): (filename not available): RtlUserThreadStart

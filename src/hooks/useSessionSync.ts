@@ -236,13 +236,12 @@ export function useSessionSync() {
       setLoggingEnabled(sessionState.loggingEnabled);
     }
 
+    // Sync recordingEnabled (alias for saveRecording) from realtime updates
     if (sessionState.recordingEnabled !== undefined && sessionState.recordingEnabled !== recordingEnabled) {
       setRecordingEnabled(sessionState.recordingEnabled);
     }
 
-    if (sessionState.playbackEnabled !== undefined && sessionState.playbackEnabled !== playbackEnabled) {
-      setPlaybackEnabled(sessionState.playbackEnabled);
-    }
+    // playbackEnabled is always true in current version - ignore stale session values
 
     if (sessionState.playbackDelay !== undefined && sessionState.playbackDelay !== playbackDelay) {
       setPlaybackDelay(sessionState.playbackDelay);

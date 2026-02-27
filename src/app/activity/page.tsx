@@ -10,14 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Download, Trash2, Copy, Activity, Calendar, RefreshCw } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useRealtimeSync } from "@/contexts/realtime-sync-context";
-import { ref as dbRef, get, remove } from "firebase/database";
-import { realtimeDb } from "@/lib/firebase/config";
-import type { AudioLogEntry } from "@/contexts/audio-monitoring-context";
+import { getActivityLogsByDate, deleteActivityLogsByDate, type ActivityLogEntry } from "@/lib/firebase/firestore";
 
 export default function ActivityPage() {
   const { user } = useAuth();
   const { viewingAsUserId } = useRealtimeSync();
-  const [logs, setLogs] = useState<AudioLogEntry[]>([]);
+  const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [copied, setCopied] = useState(false);
@@ -56,25 +54,9 @@ export default function ActivityPage() {
 
     setLoading(true);
     try {
-      // If admin is viewing a user, load that user's logs
       const targetUserId = viewingAsUserId || user.uid;
-      const logsRef = dbRef(realtimeDb, `logs/${targetUserId}/${selectedDate}`);
-      const snapshot = await get(logsRef);
-
-      if (snapshot.exists()) {
-        const logsData = snapshot.val();
-        // Convert Firebase object to array and sort by timestamp
-        const logsArray: AudioLogEntry[] = Object.keys(logsData)
-          .map(key => ({
-            ...logsData[key],
-            id: key, // Store the Firebase key for deletion
-          }))
-          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-        setLogs(logsArray);
-      } else {
-        setLogs([]);
-      }
+      const logsArray = await getActivityLogsByDate(targetUserId, selectedDate);
+      setLogs(logsArray);
     } catch (error) {
       console.error('[Activity] Failed to load logs:', error);
       setLogs([]);
@@ -120,10 +102,8 @@ export default function ActivityPage() {
 
     setDeleting(true);
     try {
-      // If admin is viewing a user, delete that user's logs
       const targetUserId = viewingAsUserId || user.uid;
-      const logsRef = dbRef(realtimeDb, `logs/${targetUserId}/${selectedDate}`);
-      await remove(logsRef);
+      await deleteActivityLogsByDate(targetUserId, selectedDate);
 
       setLogs([]);
       console.log('[Activity] Deleted logs for', selectedDate);
@@ -135,7 +115,7 @@ export default function ActivityPage() {
     }
   };
 
-  const getTypeColor = (type: AudioLogEntry["type"]) => {
+  const getTypeColor = (type: ActivityLogEntry["type"]) => {
     switch (type) {
       case "audio_detected":
         return "warning";
@@ -152,7 +132,7 @@ export default function ActivityPage() {
     }
   };
 
-  const getTypeLabel = (type: AudioLogEntry["type"]) => {
+  const getTypeLabel = (type: ActivityLogEntry["type"]) => {
     switch (type) {
       case "audio_detected":
         return "Audio";

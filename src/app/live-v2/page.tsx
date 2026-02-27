@@ -310,7 +310,13 @@ function LiveV2Content() {
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Three Input VU Meters */}
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className={`grid gap-4 ${
+                  [medicalEnabled, fireEnabled, allCallEnabled].filter(Boolean).length === 3
+                    ? 'md:grid-cols-3'
+                    : [medicalEnabled, fireEnabled, allCallEnabled].filter(Boolean).length === 2
+                      ? 'md:grid-cols-2'
+                      : 'grid-cols-1'
+                }`}>
                   {/* Medical VU Meter */}
                   {medicalEnabled && (
                     medicalInputDevice ? (

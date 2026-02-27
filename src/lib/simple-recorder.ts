@@ -116,6 +116,7 @@ interface SimpleRecorderConfig {
   // Hardware Control Callbacks
   setSpeakerZoneIP?: (speakers: any[], zoneIP: string) => Promise<void>; // Set mcast.zone1 IP:port
   setSpeakerVolume?: (speakerId: string, volumePercent: number) => Promise<void>;
+  controlPoEDevices?: (enable: boolean) => Promise<void>; // Enable/disable PoE devices (lights, etc.)
 }
 
 // Internal config type with required properties
@@ -1961,6 +1962,12 @@ export class SimpleRecorder {
 
       this.hardwareState = HardwareState.STABLE;
       this.log(`✅ EMULATION: Speaker warmup complete (${this.config.playbackDelay}ms) - safe to unmute`);
+
+      // PoE devices (lights, etc.)
+      if (this.config.controlPoEDevices) {
+        this.log('💡 EMULATION: Simulating PoE device activation');
+      }
+
       this.log('🎛️ ═══ HARDWARE ACTIVATION COMPLETE ═══');
       return;
     }
@@ -1993,6 +2000,16 @@ export class SimpleRecorder {
 
       // Wait for speaker warmup (hides white noise)
       await new Promise(resolve => setTimeout(resolve, this.config.playbackDelay));
+
+      // Enable PoE devices (lights, etc.)
+      if (this.config.controlPoEDevices) {
+        this.log('💡 Enabling PoE devices...');
+        try {
+          await this.config.controlPoEDevices(true);
+        } catch (poeError) {
+          this.log(`⚠️ PoE activation error (non-fatal): ${poeError}`, 'warning');
+        }
+      }
 
       this.hardwareState = HardwareState.STABLE;
       this.log(`✅ Speaker warmup complete (${this.config.playbackDelay}ms) - safe to unmute`);
@@ -2081,6 +2098,11 @@ export class SimpleRecorder {
         return;
       }
 
+      // PoE devices (lights, etc.)
+      if (this.config.controlPoEDevices) {
+        this.log('💡 EMULATION: Simulating PoE device deactivation');
+      }
+
       this.hardwareState = HardwareState.IDLE;
       this.hardwareTransitionAbort = null;
       this.log('✅ EMULATION: Speaker deactivation complete');
@@ -2113,6 +2135,16 @@ export class SimpleRecorder {
       } else {
         this.log('⚠️  No linked speakers to deactivate');
         this.log('');
+      }
+
+      // Disable PoE devices (lights, etc.)
+      if (this.config.controlPoEDevices) {
+        this.log('💡 Disabling PoE devices...');
+        try {
+          await this.config.controlPoEDevices(false);
+        } catch (poeError) {
+          this.log(`⚠️ PoE deactivation error (non-fatal): ${poeError}`, 'warning');
+        }
       }
 
       this.hardwareState = HardwareState.IDLE;
