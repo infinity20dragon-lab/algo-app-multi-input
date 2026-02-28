@@ -206,8 +206,14 @@ export class NetgearGS308EPController {
    * Perform the actual login (called only once, results are cached)
    */
   private async performLogin(): Promise<string> {
+    console.log(`[PoE] Performing fresh login to ${this.ipAddress}...`);
+
     // Get rand value and initial SID from login page
     const { rand, initialSid } = await this.getLoginPageData();
+    console.log(`[PoE] Got rand value, initial SID: ${initialSid ? 'yes' : 'no'}`);
+
+    // Small delay — switch uses Connection: close, needs time between connections
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Merge password with rand, then hash
     const merged = merge(this.password, rand);
@@ -243,7 +249,10 @@ export class NetgearGS308EPController {
     // Extract SID cookie
     const cookies = response.headers['set-cookie'];
     if (!cookies) {
-      throw new Error('No cookies received from login');
+      // Log response body to understand why login failed
+      const bodySnippet = response.body.substring(0, 200);
+      console.error(`[PoE] Login POST returned no cookies. Status: ${response.statusCode}, Body: ${bodySnippet}`);
+      throw new Error(`No cookies received from login (body: ${bodySnippet})`);
     }
 
     const sidMatch = cookies.join(';').match(/SID=([^;]+)/);
@@ -293,12 +302,28 @@ export class NetgearGS308EPController {
     try {
       await this.doTogglePort(portNumber, enabled);
     } catch (error) {
-      // Session might have expired — logout, clear cache, and retry once
+      console.error(`[PoE] Toggle port ${portNumber} failed:`, error instanceof Error ? error.message : error);
+      console.log(`[PoE] Cached SID exists: ${!!this.cachedSid}, retrying with fresh login...`);
+
+      // Session might have expired — logout, wait for switch to free slot, then retry
       if (this.cachedSid) {
         await this.logout(this.cachedSid);
       }
       this.cachedSid = null;
-      await this.doTogglePort(portNumber, enabled);
+
+      // Wait for switch to release session slot, then retry up to 2 times
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        try {
+          console.log(`[PoE] Retry attempt ${attempt} for port ${portNumber}`);
+          await this.doTogglePort(portNumber, enabled);
+          return; // Success
+        } catch (retryError) {
+          console.error(`[PoE] Retry ${attempt} failed:`, retryError instanceof Error ? retryError.message : retryError);
+          this.cachedSid = null;
+        }
+      }
+      throw error; // All retries failed
     }
   }
 
