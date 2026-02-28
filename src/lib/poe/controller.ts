@@ -101,9 +101,29 @@ export class NetgearGS308EPController {
   }
 
   /**
-   * Clear cached session (call when monitoring stops)
+   * Logout from the switch (frees session slot)
    */
-  clearSession(): void {
+  private async logout(sidCookie: string): Promise<void> {
+    try {
+      await httpRequest({
+        hostname: this.ipAddress,
+        port: 80,
+        path: '/logout.cgi',
+        method: 'GET',
+        headers: { 'Cookie': sidCookie },
+      }, undefined, 3000);
+    } catch {
+      // Ignore logout errors — best effort
+    }
+  }
+
+  /**
+   * Clear cached session with logout (frees session on the switch)
+   */
+  async clearSession(): Promise<void> {
+    if (this.cachedSid) {
+      await this.logout(this.cachedSid);
+    }
     this.cachedSid = null;
     this.loginInProgress = null;
   }
@@ -113,9 +133,14 @@ export class NetgearGS308EPController {
    */
   updateCredentials(credentials: PoESwitchCredentials): void {
     if (this.password !== credentials.password || this.ipAddress !== credentials.ipAddress) {
+      // Logout old session in background (don't await — fire and forget)
+      if (this.cachedSid) {
+        this.logout(this.cachedSid).catch(() => {});
+      }
       this.ipAddress = credentials.ipAddress;
       this.password = credentials.password;
-      this.clearSession();
+      this.cachedSid = null;
+      this.loginInProgress = null;
     }
   }
 
@@ -268,7 +293,10 @@ export class NetgearGS308EPController {
     try {
       await this.doTogglePort(portNumber, enabled);
     } catch (error) {
-      // Session might have expired — clear cache and retry once
+      // Session might have expired — logout, clear cache, and retry once
+      if (this.cachedSid) {
+        await this.logout(this.cachedSid);
+      }
       this.cachedSid = null;
       await this.doTogglePort(portNumber, enabled);
     }
@@ -486,10 +514,9 @@ export function createPoEController(type: string, credentials: PoESwitchCredenti
 }
 
 /**
- * Clear all cached controller sessions (call on monitoring stop)
+ * Clear all cached controller sessions with logout (call on monitoring stop)
  */
-export function clearAllPoESessions(): void {
-  for (const controller of controllerCache.values()) {
-    controller.clearSession();
-  }
+export async function clearAllPoESessions(): Promise<void> {
+  const logouts = Array.from(controllerCache.values()).map(c => c.clearSession());
+  await Promise.allSettled(logouts);
 }

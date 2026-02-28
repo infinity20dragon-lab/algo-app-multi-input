@@ -1236,22 +1236,26 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
 
     addLog(`💡 PoE: ${enable ? 'ON' : 'OFF'} — ${eligiblePoEDevices.map((d: any) => d.name).join(', ')}`, 'info');
 
-    const promises = eligiblePoEDevices.map(async (device: any) => {
-      try {
-        const response = await fetch('/api/poe/toggle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId: device.id, enabled: enable }),
-        });
-        if (!response.ok) {
-          addLog(`⚠️ PoE ${device.name} failed: HTTP ${response.status}`, 'warning');
+    try {
+      const response = await fetch('/api/poe/toggle-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          devices: eligiblePoEDevices.map((d: any) => ({ deviceId: d.id, enabled: enable })),
+        }),
+      });
+      if (!response.ok) {
+        addLog(`⚠️ PoE bulk toggle failed: HTTP ${response.status}`, 'warning');
+      } else {
+        const result = await response.json();
+        const failed = result.results?.filter((r: any) => !r.success) || [];
+        if (failed.length > 0) {
+          addLog(`⚠️ PoE: ${failed.length} device(s) failed`, 'warning');
         }
-      } catch (error) {
-        addLog(`⚠️ PoE ${device.name} error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
       }
-    });
-
-    await Promise.allSettled(promises);
+    } catch (error) {
+      addLog(`⚠️ PoE error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
+    }
   }, [poeDevices, selectedDevices, devices, emulationMode, addLog]);
 
   // Keep ref in sync for use in stopMonitoring (which is defined before controlPoEDevices)
