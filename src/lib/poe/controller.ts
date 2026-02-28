@@ -428,11 +428,24 @@ export class NetgearGS308EPController {
 
     const results: Array<{ port: number; success: boolean; error?: string }> = [];
 
-    // Login once
+    // Login once, with retry if session is stale
     let sidCookie = await this.login();
 
     // Fetch initial hash (only GET needed for the entire batch)
-    let currentHash = await this.getHashToken(sidCookie);
+    // Retry with fresh login if hash fetch fails (stale session from prior toggle)
+    let currentHash: string;
+    try {
+      currentHash = await this.getHashToken(sidCookie);
+    } catch (error) {
+      console.warn(`[PoE] Initial hash fetch failed: ${error instanceof Error ? error.message : error}. Re-logging in...`);
+      if (this.cachedSid) {
+        await this.logout(this.cachedSid);
+      }
+      this.cachedSid = null;
+      await new Promise(resolve => setTimeout(resolve, 500));
+      sidCookie = await this.login();
+      currentHash = await this.getHashToken(sidCookie);
+    }
 
     for (let i = 0; i < ports.length; i++) {
       const port = ports[i];
