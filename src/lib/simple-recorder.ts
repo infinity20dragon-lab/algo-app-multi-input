@@ -189,6 +189,7 @@ export class SimpleRecorder {
   private playbackQueue: PlaybackQueueItem[] = []; // FIFO queue of sessions to play
   private currentPlaybackItem: PlaybackQueueItem | null = null; // Currently draining item
   private lastPlaybackChannel: InputChannelType | null = null; // For zone-switch optimization
+  private emptyBufferCallbackCount: number = 0; // Safety: counts consecutive empty-buffer pulls for stuck detection
 
   // Audio Output (playback monitoring)
   private playbackAnalyserNode: AnalyserNode | null = null;
@@ -1660,6 +1661,22 @@ export class SimpleRecorder {
           item.drainTarget -= samples.length;
         }
 
+        // Safety: detect stuck playback item (buffer empty + isComplete never set)
+        // At 48kHz with 128-sample frames, 18750 callbacks ≈ 50 seconds of empty buffer.
+        // If a session has been pulling silence for 50s with no isComplete, something went wrong.
+        if (channelBuf.getAvailable() === 0 && !item.isComplete) {
+          this.emptyBufferCallbackCount++;
+          // ~50 seconds of silence = definitely stuck (normal silence timeout is ~2-5s)
+          if (this.emptyBufferCallbackCount > 18750) {
+            this.log(`⚠️ [${item.channel.toUpperCase()}] Safety: force-completing stuck session ${item.sessionId} (buffer empty for ~50s, isComplete never set)`, 'warning');
+            item.isComplete = true;
+            item.drainTarget = 0;
+            this.emptyBufferCallbackCount = 0;
+          }
+        } else {
+          this.emptyBufferCallbackCount = 0;
+        }
+
         // Write samples to output
         for (let i = 0; i < samples.length; i++) {
           output[i] = Math.max(-1, Math.min(1, samples[i]));
@@ -1672,6 +1689,7 @@ export class SimpleRecorder {
         if (item.isComplete && item.drainTarget <= 0) {
           this.log(`✅ [${item.channel.toUpperCase()}] Session drained: ${item.sessionId}`);
           this.currentPlaybackItem = null;
+          this.emptyBufferCallbackCount = 0;
           // Next callback will either dequeue next item or go DRAINING
         }
 
