@@ -956,6 +956,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       addLog('Initializing hardware...', 'info');
       await recorderRef.current.initializeHardware();
 
+      // Ensure all PoE devices are OFF on start (clean state)
+      await controlPoEDevices(false);
+
       setIsMonitoring(true);
       addLog('✅ Monitoring started', 'info');
 
@@ -999,6 +1002,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         window.nativeAudio.stopAllCaptures().catch(() => {});
       }
 
+      // Ensure all PoE devices are OFF on stop
+      await controlPoEDevices(false);
+
       linkedSpeakersRef.current = [];
       setIsMonitoring(false);
       addLog('Monitoring stopped', 'info');
@@ -1007,7 +1013,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       addLog(`Failed to stop: ${error}`, 'error');
       console.error('Failed to stop monitoring:', error);
     }
-  }, []);
+  }, [controlPoEDevices]);
 
   // Audio level callback
   const onAudioDetected = useCallback((level: number) => {
