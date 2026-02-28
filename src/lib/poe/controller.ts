@@ -428,68 +428,77 @@ export class NetgearGS308EPController {
   }
 
   /**
-   * Toggle multiple ports in TRUE parallel — bypasses the serialization queue.
-   * Each port gets its own hash fetch + toggle POST fired concurrently.
-   * This is fast but may overwhelm cheap switches; use only when DoS prevention is off.
+   * Toggle multiple ports with limited concurrency — bypasses the serialization queue.
+   * Processes `concurrency` ports at a time (default 2) to avoid overwhelming the switch.
    */
-  async togglePortsParallel(ports: PoEPortConfig[]): Promise<Array<{ port: number; success: boolean; error?: string }>> {
+  async togglePortsParallel(ports: PoEPortConfig[], concurrency: number = 2): Promise<Array<{ port: number; success: boolean; error?: string }>> {
     if (ports.length === 0) return [];
 
     // Login once (shared session)
     const sidCookie = await this.login();
 
-    // Fire all toggles concurrently — no queue, no serialization
-    const results = await Promise.allSettled(
-      ports.map(async (port) => {
-        if (port.portNumber < 1 || port.portNumber > 8) {
-          throw new Error(`Invalid port: ${port.portNumber}`);
-        }
+    const allResults: Array<{ port: number; success: boolean; error?: string }> = [];
 
-        // Each port: fetch its own hash token, then POST toggle
-        const hash = await this.getHashToken(sidCookie);
-        const portID = port.portNumber - 1;
+    // Process in chunks of `concurrency`
+    for (let i = 0; i < ports.length; i += concurrency) {
+      const chunk = ports.slice(i, i + concurrency);
 
-        const formData = new URLSearchParams({
-          hash: hash,
-          ACTION: 'Apply',
-          portID: portID.toString(),
-          ADMIN_MODE: port.enabled ? '1' : '0',
-          PORT_PRIO: '0',
-          POW_MOD: '3',
-          POW_LIMT_TYP: '2',
-          POW_LIMT: '30.0',
-          DETEC_TYP: '2',
-          DISCONNECT_TYP: '2',
+      const chunkResults = await Promise.allSettled(
+        chunk.map(async (port) => {
+          if (port.portNumber < 1 || port.portNumber > 8) {
+            throw new Error(`Invalid port: ${port.portNumber}`);
+          }
+
+          const hash = await this.getHashToken(sidCookie);
+          const portID = port.portNumber - 1;
+
+          const formData = new URLSearchParams({
+            hash: hash,
+            ACTION: 'Apply',
+            portID: portID.toString(),
+            ADMIN_MODE: port.enabled ? '1' : '0',
+            PORT_PRIO: '0',
+            POW_MOD: '3',
+            POW_LIMT_TYP: '2',
+            POW_LIMT: '30.0',
+            DETEC_TYP: '2',
+            DISCONNECT_TYP: '2',
+          });
+
+          const postData = formData.toString();
+
+          const response = await httpRequest({
+            hostname: this.ipAddress,
+            port: 80,
+            path: '/PoEPortConfig.cgi',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(postData),
+              'Cookie': sidCookie,
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+          }, postData);
+
+          if (response.statusCode !== 200) {
+            throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
+          }
+
+          return port.portNumber;
+        })
+      );
+
+      for (let j = 0; j < chunk.length; j++) {
+        const r = chunkResults[j];
+        allResults.push({
+          port: chunk[j].portNumber,
+          success: r.status === 'fulfilled',
+          error: r.status === 'rejected' ? (r.reason as Error)?.message : undefined,
         });
+      }
+    }
 
-        const postData = formData.toString();
-
-        const response = await httpRequest({
-          hostname: this.ipAddress,
-          port: 80,
-          path: '/PoEPortConfig.cgi',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Content-Length': Buffer.byteLength(postData),
-            'Cookie': sidCookie,
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-        }, postData);
-
-        if (response.statusCode !== 200) {
-          throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
-        }
-
-        return port.portNumber;
-      })
-    );
-
-    return results.map((r, i) => ({
-      port: ports[i].portNumber,
-      success: r.status === 'fulfilled',
-      error: r.status === 'rejected' ? (r.reason as Error)?.message : undefined,
-    }));
+    return allResults;
   }
 
   /**

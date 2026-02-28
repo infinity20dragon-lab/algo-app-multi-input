@@ -54,9 +54,10 @@ export async function POST(request: Request) {
       const portConfigs = ports.map(p => ({ portNumber: p.portNumber, enabled: p.enabled }));
 
       if (parallel) {
-        // TRUE parallel — all ports at once, no serialization queue
-        console.log(`[PoE Bulk] Parallel mode: toggling ${ports.length} ports concurrently`);
-        const portResults = await controller.togglePortsParallel(portConfigs);
+        // Parallel mode — 2 ports at a time (switch can't handle all at once)
+        const concurrency = 2;
+        console.log(`[PoE Bulk] Parallel mode: toggling ${ports.length} ports (${concurrency} at a time)`);
+        const portResults = await controller.togglePortsParallel(portConfigs, concurrency);
 
         for (let i = 0; i < ports.length; i++) {
           const port = ports[i];
