@@ -429,7 +429,7 @@ export class NetgearGS308EPController {
     const results: Array<{ port: number; success: boolean; error?: string }> = [];
 
     // Login once
-    const sidCookie = await this.login();
+    let sidCookie = await this.login();
 
     // Fetch initial hash (only GET needed for the entire batch)
     let currentHash = await this.getHashToken(sidCookie);
@@ -441,61 +441,77 @@ export class NetgearGS308EPController {
         continue;
       }
 
-      try {
-        const portID = port.portNumber - 1;
+      let success = false;
 
-        const formData = new URLSearchParams({
-          hash: currentHash,
-          ACTION: 'Apply',
-          portID: portID.toString(),
-          ADMIN_MODE: port.enabled ? '1' : '0',
-          PORT_PRIO: '0',
-          POW_MOD: '3',
-          POW_LIMT_TYP: '2',
-          POW_LIMT: '30.0',
-          DETEC_TYP: '2',
-          DISCONNECT_TYP: '2',
-        });
+      // Try up to 2 times (original + 1 retry with fresh login)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const portID = port.portNumber - 1;
 
-        const postData = formData.toString();
+          const formData = new URLSearchParams({
+            hash: currentHash,
+            ACTION: 'Apply',
+            portID: portID.toString(),
+            ADMIN_MODE: port.enabled ? '1' : '0',
+            PORT_PRIO: '0',
+            POW_MOD: '3',
+            POW_LIMT_TYP: '2',
+            POW_LIMT: '30.0',
+            DETEC_TYP: '2',
+            DISCONNECT_TYP: '2',
+          });
 
-        const response = await httpRequest({
-          hostname: this.ipAddress,
-          port: 80,
-          path: '/PoEPortConfig.cgi',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Content-Length': Buffer.byteLength(postData),
-            'Cookie': sidCookie,
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-        }, postData);
+          const postData = formData.toString();
 
-        if (response.statusCode !== 200) {
-          throw new Error(`HTTP ${response.statusCode}`);
-        }
+          const response = await httpRequest({
+            hostname: this.ipAddress,
+            port: 80,
+            path: '/PoEPortConfig.cgi',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(postData),
+              'Cookie': sidCookie,
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+          }, postData);
 
-        // Try to parse next hash from POST response (avoids a separate GET)
-        const nextHash = response.body.match(/name='hash'[^>]*value="([^"]+)"/);
-        if (nextHash) {
-          currentHash = nextHash[1];
-        }
-        // Otherwise reuse currentHash — Netgear accepts the same hash for the session
+          if (response.statusCode !== 200) {
+            throw new Error(`HTTP ${response.statusCode}`);
+          }
 
-        results.push({ port: port.portNumber, success: true });
-      } catch (error) {
-        results.push({
-          port: port.portNumber,
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        // If a port fails, fetch a fresh hash for the next attempt
-        if (i < ports.length - 1) {
-          try {
-            currentHash = await this.getHashToken(sidCookie);
-          } catch {
-            // If we can't even get a hash, remaining ports will likely fail too
+          // Try to parse next hash from POST response
+          const nextHash = response.body.match(/name='hash'[^>]*value="([^"]+)"/);
+          if (nextHash) {
+            currentHash = nextHash[1];
+          }
+
+          results.push({ port: port.portNumber, success: true });
+          success = true;
+          break;
+        } catch (error) {
+          if (attempt === 0) {
+            // First failure — session likely expired, re-login and retry
+            console.warn(`[PoE] Port ${port.portNumber} failed, re-logging in...`);
+            if (this.cachedSid) {
+              await this.logout(this.cachedSid);
+            }
+            this.cachedSid = null;
+            await new Promise(resolve => setTimeout(resolve, 500));
+            try {
+              sidCookie = await this.login();
+              currentHash = await this.getHashToken(sidCookie);
+            } catch {
+              results.push({ port: port.portNumber, success: false, error: 'Re-login failed' });
+              success = true; // skip retry
+              break;
+            }
+          } else {
+            results.push({
+              port: port.portNumber,
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            });
           }
         }
       }

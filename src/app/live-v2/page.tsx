@@ -188,6 +188,7 @@ function LiveV2Content() {
 
   // Alias isMonitoring as isCapturing for UI compatibility
   const isCapturing = isMonitoring;
+  const [monitoringTransition, setMonitoringTransition] = useState(false);
 
   useEffect(() => {
     if (user?.email) {
@@ -294,26 +295,35 @@ function LiveV2Content() {
                   </div>
                   {!isCapturing ? (
                     <Button
-                      onClick={() => {
+                      onClick={async () => {
                         console.log('[Live V2] User clicked Start Monitoring');
-                        startMonitoring();
+                        setMonitoringTransition(true);
+                        try { await startMonitoring(); } finally { setMonitoringTransition(false); }
                       }}
-                      disabled={otherPageIsMonitoring}
+                      disabled={otherPageIsMonitoring || monitoringTransition}
                       title={otherPageIsMonitoring ? "Monitoring is already active on /live page" : ""}
                     >
-                      <Mic className="mr-2 h-4 w-4" />
-                      {otherPageIsMonitoring ? "Monitoring Active on /live" : "Start Monitoring"}
+                      {monitoringTransition ? (
+                        <><span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent inline-block" /> Starting...</>
+                      ) : (
+                        <><Mic className="mr-2 h-4 w-4" />{otherPageIsMonitoring ? "Monitoring Active on /live" : "Start Monitoring"}</>
+                      )}
                     </Button>
                   ) : (
                     <Button
                       variant="destructive"
-                      onClick={() => {
+                      onClick={async () => {
                         console.log('[Live V2] User clicked Stop Monitoring');
-                        stopMonitoring();
+                        setMonitoringTransition(true);
+                        try { await stopMonitoring(); } finally { setMonitoringTransition(false); }
                       }}
+                      disabled={monitoringTransition}
                     >
-                      <MicOff className="mr-2 h-4 w-4" />
-                      Stop
+                      {monitoringTransition ? (
+                        <><span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent inline-block" /> Stopping...</>
+                      ) : (
+                        <><MicOff className="mr-2 h-4 w-4" />Stop</>
+                      )}
                     </Button>
                   )}
                 </div>
