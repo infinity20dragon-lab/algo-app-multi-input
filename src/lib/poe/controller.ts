@@ -428,6 +428,71 @@ export class NetgearGS308EPController {
   }
 
   /**
+   * Toggle multiple ports in TRUE parallel — bypasses the serialization queue.
+   * Each port gets its own hash fetch + toggle POST fired concurrently.
+   * This is fast but may overwhelm cheap switches; use only when DoS prevention is off.
+   */
+  async togglePortsParallel(ports: PoEPortConfig[]): Promise<Array<{ port: number; success: boolean; error?: string }>> {
+    if (ports.length === 0) return [];
+
+    // Login once (shared session)
+    const sidCookie = await this.login();
+
+    // Fire all toggles concurrently — no queue, no serialization
+    const results = await Promise.allSettled(
+      ports.map(async (port) => {
+        if (port.portNumber < 1 || port.portNumber > 8) {
+          throw new Error(`Invalid port: ${port.portNumber}`);
+        }
+
+        // Each port: fetch its own hash token, then POST toggle
+        const hash = await this.getHashToken(sidCookie);
+        const portID = port.portNumber - 1;
+
+        const formData = new URLSearchParams({
+          hash: hash,
+          ACTION: 'Apply',
+          portID: portID.toString(),
+          ADMIN_MODE: port.enabled ? '1' : '0',
+          PORT_PRIO: '0',
+          POW_MOD: '3',
+          POW_LIMT_TYP: '2',
+          POW_LIMT: '30.0',
+          DETEC_TYP: '2',
+          DISCONNECT_TYP: '2',
+        });
+
+        const postData = formData.toString();
+
+        const response = await httpRequest({
+          hostname: this.ipAddress,
+          port: 80,
+          path: '/PoEPortConfig.cgi',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(postData),
+            'Cookie': sidCookie,
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        }, postData);
+
+        if (response.statusCode !== 200) {
+          throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
+        }
+
+        return port.portNumber;
+      })
+    );
+
+    return results.map((r, i) => ({
+      port: ports[i].portNumber,
+      success: r.status === 'fulfilled',
+      error: r.status === 'rejected' ? (r.reason as Error)?.message : undefined,
+    }));
+  }
+
+  /**
    * Enable a PoE port
    */
   async enablePort(portNumber: number): Promise<void> {

@@ -51,32 +51,46 @@ export async function POST(request: Request) {
         password: poeSwitch.password,
       });
 
-      const togglePort = async (port: typeof ports[0]) => {
-        try {
-          await controller.togglePort(port.portNumber, port.enabled);
-          console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
-          await updatePoEDevice(port.deviceId, {
-            isEnabled: port.enabled,
-            lastToggled: new Date(),
-            isOnline: true,
-          });
-          results.push({ deviceId: port.deviceId, success: true });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${msg}`);
-          results.push({ deviceId: port.deviceId, success: false, error: msg });
-        }
-      };
+      const portConfigs = ports.map(p => ({ portNumber: p.portNumber, enabled: p.enabled }));
 
       if (parallel) {
-        // Parallel mode — all ports at once (fast, needs DoS prevention OFF)
-        console.log(`[PoE Bulk] Parallel mode: toggling ${ports.length} ports at once`);
-        await Promise.allSettled(ports.map(togglePort));
+        // TRUE parallel — all ports at once, no serialization queue
+        console.log(`[PoE Bulk] Parallel mode: toggling ${ports.length} ports concurrently`);
+        const portResults = await controller.togglePortsParallel(portConfigs);
+
+        for (let i = 0; i < ports.length; i++) {
+          const port = ports[i];
+          const result = portResults[i];
+          if (result.success) {
+            console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
+            await updatePoEDevice(port.deviceId, {
+              isEnabled: port.enabled,
+              lastToggled: new Date(),
+              isOnline: true,
+            });
+          } else {
+            console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${result.error}`);
+          }
+          results.push({ deviceId: port.deviceId, success: result.success, error: result.error });
+        }
       } else {
-        // Sequential mode — one port at a time (safe)
+        // Sequential mode — one port at a time via batch method (single session)
         console.log(`[PoE Bulk] Sequential mode: toggling ${ports.length} ports (delay: ${delay}ms)`);
         for (const port of ports) {
-          await togglePort(port);
+          try {
+            await controller.togglePort(port.portNumber, port.enabled);
+            console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
+            await updatePoEDevice(port.deviceId, {
+              isEnabled: port.enabled,
+              lastToggled: new Date(),
+              isOnline: true,
+            });
+            results.push({ deviceId: port.deviceId, success: true });
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${msg}`);
+            results.push({ deviceId: port.deviceId, success: false, error: msg });
+          }
           if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay));
           }
