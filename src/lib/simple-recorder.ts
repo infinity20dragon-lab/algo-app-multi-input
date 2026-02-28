@@ -2001,14 +2001,12 @@ export class SimpleRecorder {
       // Wait for speaker warmup (hides white noise)
       await new Promise(resolve => setTimeout(resolve, this.config.playbackDelay));
 
-      // Enable PoE devices (lights, etc.)
+      // Enable PoE devices (lights, etc.) — fire and forget, don't block playback
       if (this.config.controlPoEDevices) {
-        this.log('💡 Enabling PoE devices...');
-        try {
-          await this.config.controlPoEDevices(true);
-        } catch (poeError) {
+        this.log('💡 Enabling PoE devices (background)...');
+        this.config.controlPoEDevices(true).catch(poeError => {
           this.log(`⚠️ PoE activation error (non-fatal): ${poeError}`, 'warning');
-        }
+        });
       }
 
       this.hardwareState = HardwareState.STABLE;
@@ -2137,14 +2135,12 @@ export class SimpleRecorder {
         this.log('');
       }
 
-      // Disable PoE devices (lights, etc.)
+      // Disable PoE devices (lights, etc.) — fire and forget, don't block shutdown
       if (this.config.controlPoEDevices) {
-        this.log('💡 Disabling PoE devices...');
-        try {
-          await this.config.controlPoEDevices(false);
-        } catch (poeError) {
+        this.log('💡 Disabling PoE devices (background)...');
+        this.config.controlPoEDevices(false).catch(poeError => {
           this.log(`⚠️ PoE deactivation error (non-fatal): ${poeError}`, 'warning');
-        }
+        });
       }
 
       this.hardwareState = HardwareState.IDLE;

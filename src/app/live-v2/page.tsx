@@ -131,6 +131,11 @@ function LiveV2Content() {
     devices: contextDevices,
     setDevices: setContextDevices,
     setPoeDevices,
+    poeKeepAliveDuration,
+    setPoeKeepAliveDuration,
+    poeAutoDisabled,
+    togglePoEAutoControl,
+    setPoeAllAutoEnabled,
     emergencyKillAll,
     emergencyEnableAll,
     controlSingleSpeaker,
@@ -1211,6 +1216,28 @@ function LiveV2Content() {
                     </p>
                   </div>
                 )}
+
+                {/* PoE Keep-Alive Duration */}
+                {poeDevices.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label>PoE Keep-Alive</Label>
+                      <span className="text-sm font-mono text-[var(--accent-blue)]">
+                        {Math.floor(poeKeepAliveDuration / 60000)}:{((poeKeepAliveDuration % 60000) / 1000).toFixed(0).padStart(2, '0')}
+                      </span>
+                    </div>
+                    <Slider
+                      min={0}
+                      max={600000}
+                      step={30000}
+                      value={poeKeepAliveDuration}
+                      onChange={(e) => setPoeKeepAliveDuration(parseInt(e.target.value))}
+                    />
+                    <p className="text-xs text-[var(--text-muted)]">
+                      How long PoE lights stay on after a call ends. Gives crew time to get ready.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -1363,6 +1390,73 @@ function LiveV2Content() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* PoE Lights Control */}
+            {poeDevices.filter((d: any) => d.mode === 'auto').length > 0 && (
+              <Card className="border-[var(--accent-yellow)]/30">
+                <CardHeader className="py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-md bg-[var(--accent-yellow)]/15">
+                        <Power className="h-3.5 w-3.5 text-[var(--accent-yellow)]" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm">PoE Lights</CardTitle>
+                        <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                          Auto-controlled during calls
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() => setPoeAllAutoEnabled(true)}
+                      >
+                        All On
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() => setPoeAllAutoEnabled(false)}
+                      >
+                        All Off
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="py-0 pb-3 space-y-1.5 max-h-[250px] overflow-y-auto">
+                  {poeDevices
+                    .filter((d: any) => d.mode === 'auto')
+                    .map((device: any) => {
+                      const isEnabled = !poeAutoDisabled.has(device.id);
+                      return (
+                        <div
+                          key={device.id}
+                          className={`flex items-center justify-between p-2 rounded-lg border transition-all ${
+                            isEnabled
+                              ? 'border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/5'
+                              : 'border-[var(--border-color)] opacity-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isEnabled ? 'bg-[var(--accent-yellow)]' : 'bg-[var(--text-muted)]'}`} />
+                            <span className="text-xs font-medium text-[var(--text-primary)] truncate">
+                              {device.name || `Port ${device.portNumber}`}
+                            </span>
+                          </div>
+                          <Switch
+                            checked={isEnabled}
+                            onCheckedChange={() => togglePoEAutoControl(device.id)}
+                          />
+                        </div>
+                      );
+                    })}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Zone Routing Panel */}
             <Card className={zonedPlayback ? "border-[var(--accent-purple)]/40" : ""}>

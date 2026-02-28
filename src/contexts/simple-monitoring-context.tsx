@@ -170,7 +170,14 @@ interface SimpleMonitoringContextType {
   setEmulationNetworkDelay: (ms: number) => void;
   onAudioDetected: (level: number) => void;
 
-  // Emergency Controls (TODO: Implement)
+  // PoE Control
+  poeKeepAliveDuration: number;
+  setPoeKeepAliveDuration: (ms: number) => void;
+  poeAutoDisabled: Set<string>;
+  togglePoEAutoControl: (deviceId: string) => void;
+  setPoeAllAutoEnabled: (enabled: boolean) => void;
+
+  // Emergency Controls
   emergencyKillAll: () => Promise<void>;
   emergencyEnableAll: () => Promise<void>;
   controlSingleSpeaker: (speakerId: string, enable: boolean) => Promise<void>;
@@ -272,6 +279,10 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const [fireNativeDeviceId, setFireNativeDeviceId] = useState<number | null>(null);
   const [allCallNativeDeviceId, setAllCallNativeDeviceId] = useState<number | null>(null);
 
+  // PoE Control
+  const [poeKeepAliveDuration, setPoeKeepAliveDuration] = useState(240000); // 4 minutes default
+  const [poeAutoDisabled, setPoeAutoDisabled] = useState<Set<string>>(new Set());
+
   // Emulation
   const [emulationMode, setEmulationMode] = useState(false);
   const [emulationNetworkDelay, setEmulationNetworkDelay] = useState(0);
@@ -283,7 +294,10 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const recorderRef = useRef<SimpleRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const linkedSpeakersRef = useRef<any[]>([]);
-  const controlPoEDevicesRef = useRef<(enable: boolean) => Promise<void>>(async () => {});
+  const controlPoEDevicesRef = useRef<(enable: boolean, force?: boolean) => Promise<void>>(async () => {});
+  const poeOffTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const poeCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const poeIsOnRef = useRef(false);
   const splitContextRef = useRef<AudioContext | null>(null);
   // Native audio bridge refs
   const nativeBridgeContextRef = useRef<AudioContext | null>(null);
@@ -437,6 +451,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     if (sessionState.medicalNativeDeviceId !== undefined) setMedicalNativeDeviceId(sessionState.medicalNativeDeviceId);
     if (sessionState.fireNativeDeviceId !== undefined) setFireNativeDeviceId(sessionState.fireNativeDeviceId);
     if (sessionState.allCallNativeDeviceId !== undefined) setAllCallNativeDeviceId(sessionState.allCallNativeDeviceId);
+
+    // Load PoE settings
+    if (sessionState.poeKeepAliveDuration !== undefined) setPoeKeepAliveDuration(sessionState.poeKeepAliveDuration);
   }, [sessionState]);
 
   // Sync settings to RTDB when they change
@@ -489,6 +506,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       medicalNativeDeviceId,
       fireNativeDeviceId,
       allCallNativeDeviceId,
+      poeKeepAliveDuration,
     });
   }, [
     selectedDevices,
@@ -504,6 +522,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     medicalChannel, fireChannel, allCallChannel,
     zonedPlayback, zoneScheduleEnabled,
     useNativeAudio, medicalNativeDeviceId, fireNativeDeviceId, allCallNativeDeviceId,
+    poeKeepAliveDuration,
     syncSessionState,
   ]);
 
@@ -1003,8 +1022,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         window.nativeAudio.stopAllCaptures().catch(() => {});
       }
 
-      // Ensure all PoE devices are OFF on stop, then clear session
-      await controlPoEDevicesRef.current(false);
+      // Ensure all PoE devices are OFF on stop (force immediate), then clear session
+      await controlPoEDevicesRef.current(false, true);
       // Clear PoE sessions server-side
       fetch('/api/poe/clear-session', { method: 'POST' }).catch(() => {});
 
@@ -1209,15 +1228,22 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
   }, [emulationMode, addLog]);
 
-  // Control PoE devices (lights, etc.) — auto mode only, linked to active paging devices
-  const controlPoEDevices = useCallback(async (enable: boolean) => {
-    if (emulationMode) {
-      addLog(`🧪 EMULATION: Simulated ${enable ? 'enabling' : 'disabling'} PoE devices`, 'info');
-      return;
+  // Helper: clear PoE countdown timer and interval
+  const clearPoECountdown = useCallback(() => {
+    if (poeOffTimerRef.current) {
+      clearTimeout(poeOffTimerRef.current);
+      poeOffTimerRef.current = null;
     }
+    if (poeCountdownRef.current) {
+      clearInterval(poeCountdownRef.current);
+      poeCountdownRef.current = null;
+    }
+  }, []);
 
-    // Get PoE devices in auto mode
-    const autoPoEDevices = poeDevices.filter((d: any) => d.mode === 'auto');
+  // Low-level PoE toggle (sends the actual API call)
+  const sendPoEToggle = useCallback(async (enable: boolean) => {
+    // Get PoE devices in auto mode, excluding user-disabled ones
+    const autoPoEDevices = poeDevices.filter((d: any) => d.mode === 'auto' && !poeAutoDisabled.has(d.id));
     if (autoPoEDevices.length === 0) return;
 
     // Get active paging devices (8301) from selected devices
@@ -1256,7 +1282,84 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     } catch (error) {
       addLog(`⚠️ PoE error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
     }
-  }, [poeDevices, selectedDevices, devices, emulationMode, addLog]);
+  }, [poeDevices, poeAutoDisabled, selectedDevices, devices, addLog]);
+
+  // Toggle individual PoE device auto-control (include/exclude from auto-control)
+  const togglePoEAutoControl = useCallback((deviceId: string) => {
+    setPoeAutoDisabled(prev => {
+      const next = new Set(prev);
+      if (next.has(deviceId)) {
+        next.delete(deviceId);
+      } else {
+        next.add(deviceId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Enable/disable all PoE devices for auto-control
+  const setPoeAllAutoEnabled = useCallback((enabled: boolean) => {
+    if (enabled) {
+      setPoeAutoDisabled(new Set());
+    } else {
+      const allAutoIds = poeDevices.filter((d: any) => d.mode === 'auto').map((d: any) => d.id);
+      setPoeAutoDisabled(new Set(allAutoIds));
+    }
+  }, [poeDevices]);
+
+  // Control PoE devices with keep-alive timer and per-second countdown logging
+  const controlPoEDevices = useCallback(async (enable: boolean, force?: boolean) => {
+    if (emulationMode) {
+      addLog(`🧪 EMULATION: Simulated ${enable ? 'enabling' : 'disabling'} PoE devices`, 'info');
+      return;
+    }
+
+    // Check if any PoE devices are auto-enabled
+    const hasEnabledDevices = poeDevices.some((d: any) => d.mode === 'auto' && !poeAutoDisabled.has(d.id));
+    if (!hasEnabledDevices) return;
+
+    // Clear any pending countdown
+    clearPoECountdown();
+
+    if (enable) {
+      // Turn ON immediately (if not already on)
+      if (!poeIsOnRef.current) {
+        poeIsOnRef.current = true;
+        await sendPoEToggle(true);
+      } else {
+        addLog('💡 PoE: already ON — timer reset', 'info');
+        console.log('[PoE] Timer reset — lights stay ON');
+      }
+    } else if (force) {
+      // FORCE OFF — immediate (stop monitoring / emergency)
+      if (poeIsOnRef.current) {
+        poeIsOnRef.current = false;
+        await sendPoEToggle(false);
+      }
+    } else {
+      // Start countdown with per-second logging
+      let remaining = Math.ceil(poeKeepAliveDuration / 1000);
+      const mins = Math.floor(remaining / 60);
+      const secs = remaining % 60;
+      addLog(`💡 PoE: will turn OFF in ${mins}:${secs.toString().padStart(2, '0')}`, 'info');
+
+      poeCountdownRef.current = setInterval(() => {
+        remaining--;
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        console.log(`[PoE] Lights OFF in ${m}:${s.toString().padStart(2, '0')}...`);
+
+        if (remaining <= 0) {
+          clearPoECountdown();
+          console.log('[PoE] Turning lights OFF now');
+          if (poeIsOnRef.current) {
+            poeIsOnRef.current = false;
+            sendPoEToggle(false);
+          }
+        }
+      }, 1000);
+    }
+  }, [emulationMode, poeDevices, poeAutoDisabled, poeKeepAliveDuration, sendPoEToggle, clearPoECountdown, addLog]);
 
   // Keep ref in sync for use in stopMonitoring (which is defined before controlPoEDevices)
   controlPoEDevicesRef.current = controlPoEDevices;
@@ -1270,7 +1373,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
     addLog(`🚨 EMERGENCY: Muting all ${speakers.length} speakers (idle zone)...`, 'warning');
     await setSpeakersZoneIP(speakers, '224.0.2.60:50022');
-    await controlPoEDevices(false);
+    await controlPoEDevices(false, true); // force immediate off
   }, [setSpeakersZoneIP, controlPoEDevices, addLog]);
 
   const emergencyEnableAll = useCallback(async () => {
@@ -1450,6 +1553,13 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     setEmulationMode,
     setEmulationNetworkDelay,
     onAudioDetected,
+
+    // PoE Control
+    poeKeepAliveDuration,
+    setPoeKeepAliveDuration,
+    poeAutoDisabled,
+    togglePoEAutoControl,
+    setPoeAllAutoEnabled,
 
     // Emergency Controls
     emergencyKillAll,

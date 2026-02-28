@@ -52,7 +52,7 @@ function merge(str1: string, str2: string): string {
 /**
  * Helper to make HTTP requests using Node's http module
  */
-function httpRequest(options: http.RequestOptions, body?: string, timeout: number = 5000): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
+function httpRequest(options: http.RequestOptions, body?: string, timeout: number = 10000): Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(options, (res) => {
       let data = '';
@@ -94,10 +94,22 @@ export class NetgearGS308EPController {
   private password: string;
   private cachedSid: string | null = null;
   private loginInProgress: Promise<string> | null = null;
+  private requestQueue: Promise<void> = Promise.resolve();
 
   constructor(credentials: PoESwitchCredentials) {
     this.ipAddress = credentials.ipAddress;
     this.password = credentials.password;
+  }
+
+  /**
+   * Serialize all requests to the switch — one at a time
+   */
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.requestQueue = this.requestQueue
+        .then(() => fn().then(resolve, reject))
+        .catch(() => {}); // Keep queue alive even if one request fails
+    });
   }
 
   /**
@@ -299,32 +311,24 @@ export class NetgearGS308EPController {
       throw new Error(`Invalid port number: ${portNumber}. Must be 1-8.`);
     }
 
-    try {
-      await this.doTogglePort(portNumber, enabled);
-    } catch (error) {
-      console.error(`[PoE] Toggle port ${portNumber} failed:`, error instanceof Error ? error.message : error);
-      console.log(`[PoE] Cached SID exists: ${!!this.cachedSid}, retrying with fresh login...`);
+    // All requests to this switch are serialized through the queue
+    return this.enqueue(async () => {
+      try {
+        await this.doTogglePort(portNumber, enabled);
+      } catch (error) {
+        console.error(`[PoE] Toggle port ${portNumber} failed:`, error instanceof Error ? error.message : error);
 
-      // Session might have expired — logout, wait for switch to free slot, then retry
-      if (this.cachedSid) {
-        await this.logout(this.cachedSid);
-      }
-      this.cachedSid = null;
-
-      // Wait for switch to release session slot, then retry up to 2 times
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        try {
-          console.log(`[PoE] Retry attempt ${attempt} for port ${portNumber}`);
-          await this.doTogglePort(portNumber, enabled);
-          return; // Success
-        } catch (retryError) {
-          console.error(`[PoE] Retry ${attempt} failed:`, retryError instanceof Error ? retryError.message : retryError);
-          this.cachedSid = null;
+        // Session might have expired — logout and retry once
+        if (this.cachedSid) {
+          await this.logout(this.cachedSid);
         }
+        this.cachedSid = null;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        console.log(`[PoE] Retrying port ${portNumber}...`);
+        await this.doTogglePort(portNumber, enabled);
       }
-      throw error; // All retries failed
-    }
+    });
   }
 
   private async doTogglePort(portNumber: number, enabled: boolean): Promise<void> {
@@ -377,6 +381,7 @@ export class NetgearGS308EPController {
   async togglePorts(ports: PoEPortConfig[]): Promise<void> {
     if (ports.length === 0) return;
 
+    return this.enqueue(async () => {
     // Login once
     const sidCookie = await this.login();
 
@@ -419,6 +424,7 @@ export class NetgearGS308EPController {
         throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
       }
     }
+    }); // end enqueue
   }
 
   /**
@@ -439,6 +445,7 @@ export class NetgearGS308EPController {
    * Get status of all PoE ports
    */
   async getPortStatuses(): Promise<Array<{ port: number; enabled: boolean }>> {
+    return this.enqueue(async () => {
     // Login to get SID cookie
     const sidCookie = await this.login();
 
@@ -478,6 +485,7 @@ export class NetgearGS308EPController {
     portStatuses.sort((a, b) => a.port - b.port);
 
     return portStatuses;
+    }); // end enqueue
   }
 
   /**
