@@ -1454,6 +1454,7 @@ export class SimpleRecorder {
               channelSessionId = `${channel}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
               this.currentChannelSessions.set(channel, channelSessionId);
 
+              console.clear();
               this.log(`📋 [${channel.toUpperCase()}] NEW SESSION: ${channelSessionId}`);
 
               // 🔥 FLUSH stale samples from THIS CHANNEL'S ring buffer only.
