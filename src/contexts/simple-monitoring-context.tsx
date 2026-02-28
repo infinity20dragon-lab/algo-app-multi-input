@@ -1003,8 +1003,10 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         window.nativeAudio.stopAllCaptures().catch(() => {});
       }
 
-      // Ensure all PoE devices are OFF on stop
-      controlPoEDevicesRef.current(false);
+      // Ensure all PoE devices are OFF on stop, then clear session
+      await controlPoEDevicesRef.current(false);
+      // Clear PoE sessions server-side
+      fetch('/api/poe/clear-session', { method: 'POST' }).catch(() => {});
 
       linkedSpeakersRef.current = [];
       setIsMonitoring(false);

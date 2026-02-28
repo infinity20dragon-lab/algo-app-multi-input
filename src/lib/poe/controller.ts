@@ -109,6 +109,17 @@ export class NetgearGS308EPController {
   }
 
   /**
+   * Update credentials (if password changed in UI). Clears session if password differs.
+   */
+  updateCredentials(credentials: PoESwitchCredentials): void {
+    if (this.password !== credentials.password || this.ipAddress !== credentials.ipAddress) {
+      this.ipAddress = credentials.ipAddress;
+      this.password = credentials.password;
+      this.clearSession();
+    }
+  }
+
+  /**
    * Get the rand value and initial SID cookie from the login page
    */
   private async getLoginPageData(): Promise<{ rand: string; initialSid: string | null }> {
@@ -456,6 +467,8 @@ export function createPoEController(type: string, credentials: PoESwitchCredenti
 
   const existing = controllerCache.get(cacheKey);
   if (existing) {
+    // Update credentials if they changed (e.g. password updated in UI)
+    existing.updateCredentials(credentials);
     return existing;
   }
 
