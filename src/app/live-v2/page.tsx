@@ -130,6 +130,7 @@ function LiveV2Content() {
     setPlaybackRampEndHour,
     devices: contextDevices,
     setDevices: setContextDevices,
+    poeDevices,
     setPoeDevices,
     poeKeepAliveDuration,
     setPoeKeepAliveDuration,
