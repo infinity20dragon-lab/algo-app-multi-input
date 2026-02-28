@@ -1,6 +1,24 @@
 import { NextResponse } from "next/server";
 import { getPoESwitch, getPoEDevice, updatePoEDevice, updatePoESwitch } from "@/lib/firebase/firestore";
 import { createPoEController } from "@/lib/poe/controller";
+import type { PoEDeviceMode } from "@/lib/algo/types";
+
+// PATCH — update a single PoE device's mode (auto/always_off/always_on)
+export async function PATCH(request: Request) {
+  try {
+    const { deviceId, mode } = await request.json() as { deviceId: string; mode: PoEDeviceMode };
+    if (!deviceId || !mode) {
+      return NextResponse.json({ error: "deviceId and mode required" }, { status: 400 });
+    }
+    await updatePoEDevice(deviceId, { mode });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to update mode" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request: Request) {
   try {

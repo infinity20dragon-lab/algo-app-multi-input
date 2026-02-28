@@ -266,7 +266,13 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   // Devices
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
-  const [poeDevices, setPoeDevices] = useState<PoEDevice[]>([]);
+  const [poeDevices, setPoeDevicesRaw] = useState<PoEDevice[]>([]);
+  // Wrap setPoeDevices to auto-initialize poeAutoDisabled from persisted modes
+  const setPoeDevices = useCallback((devices: PoEDevice[]) => {
+    setPoeDevicesRaw(devices);
+    const disabledIds = devices.filter(d => d.mode === 'always_off').map(d => d.id);
+    setPoeAutoDisabled(new Set(disabledIds));
+  }, []);
   const [speakerStatuses, setSpeakerStatuses] = useState<SpeakerStatus[]>([]);
 
   // Zones (for zoned playback)
@@ -1296,15 +1302,25 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
   }, [poeDevices, poeAutoDisabled, poeParallelMode, poeToggleDelay, selectedDevices, devices, addLog]);
 
-  // Toggle individual PoE device auto-control (include/exclude from auto-control)
+  // Toggle individual PoE device auto-control — persists mode to Firestore
   const togglePoEAutoControl = useCallback((deviceId: string) => {
     setPoeAutoDisabled(prev => {
       const next = new Set(prev);
-      if (next.has(deviceId)) {
+      const wasDisabled = next.has(deviceId);
+      if (wasDisabled) {
         next.delete(deviceId);
       } else {
         next.add(deviceId);
       }
+
+      // Persist mode change to Firestore
+      const newMode = wasDisabled ? 'auto' : 'always_off';
+      fetch('/api/poe/toggle-bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId, mode: newMode }),
+      }).catch(() => {}); // fire and forget
+
       return next;
     });
   }, []);
