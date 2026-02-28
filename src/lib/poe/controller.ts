@@ -92,10 +92,20 @@ function httpRequest(options: http.RequestOptions, body?: string, timeout: numbe
 export class NetgearGS308EPController {
   private ipAddress: string;
   private password: string;
+  private cachedSid: string | null = null;
+  private loginInProgress: Promise<string> | null = null;
 
   constructor(credentials: PoESwitchCredentials) {
     this.ipAddress = credentials.ipAddress;
     this.password = credentials.password;
+  }
+
+  /**
+   * Clear cached session (call when monitoring stops)
+   */
+  clearSession(): void {
+    this.cachedSid = null;
+    this.loginInProgress = null;
   }
 
   /**
@@ -123,9 +133,33 @@ export class NetgearGS308EPController {
   }
 
   /**
-   * Login to the switch and get SID cookie
+   * Login to the switch and get SID cookie (with session caching)
    */
   private async login(): Promise<string> {
+    // Return cached session if available
+    if (this.cachedSid) {
+      return this.cachedSid;
+    }
+
+    // If a login is already in progress, wait for it (prevents concurrent logins)
+    if (this.loginInProgress) {
+      return this.loginInProgress;
+    }
+
+    this.loginInProgress = this.performLogin();
+    try {
+      const sid = await this.loginInProgress;
+      this.cachedSid = sid;
+      return sid;
+    } finally {
+      this.loginInProgress = null;
+    }
+  }
+
+  /**
+   * Perform the actual login (called only once, results are cached)
+   */
+  private async performLogin(): Promise<string> {
     // Get rand value
     const rand = await this.getRandValue();
 
@@ -195,7 +229,7 @@ export class NetgearGS308EPController {
   }
 
   /**
-   * Toggle a PoE port on or off
+   * Toggle a PoE port on or off (with automatic session retry)
    */
   async togglePort(portNumber: number, enabled: boolean): Promise<void> {
     // Validate port number
@@ -203,7 +237,17 @@ export class NetgearGS308EPController {
       throw new Error(`Invalid port number: ${portNumber}. Must be 1-8.`);
     }
 
-    // Login to get SID cookie
+    try {
+      await this.doTogglePort(portNumber, enabled);
+    } catch (error) {
+      // Session might have expired — clear cache and retry once
+      this.cachedSid = null;
+      await this.doTogglePort(portNumber, enabled);
+    }
+  }
+
+  private async doTogglePort(portNumber: number, enabled: boolean): Promise<void> {
+    // Login to get SID cookie (uses cache if available)
     const sidCookie = await this.login();
 
     // Get hash token
@@ -243,6 +287,56 @@ export class NetgearGS308EPController {
 
     if (response.statusCode !== 200) {
       throw new Error(`Failed to toggle port: ${response.statusCode}`);
+    }
+  }
+
+  /**
+   * Toggle multiple ports sequentially with a single session
+   */
+  async togglePorts(ports: PoEPortConfig[]): Promise<void> {
+    if (ports.length === 0) return;
+
+    // Login once
+    const sidCookie = await this.login();
+
+    for (const port of ports) {
+      if (port.portNumber < 1 || port.portNumber > 8) continue;
+
+      // Get fresh hash token for each toggle (switch requires it)
+      const hash = await this.getHashToken(sidCookie);
+      const portID = port.portNumber - 1;
+
+      const formData = new URLSearchParams({
+        hash: hash,
+        ACTION: 'Apply',
+        portID: portID.toString(),
+        ADMIN_MODE: port.enabled ? '1' : '0',
+        PORT_PRIO: '0',
+        POW_MOD: '3',
+        POW_LIMT_TYP: '2',
+        POW_LIMT: '30.0',
+        DETEC_TYP: '2',
+        DISCONNECT_TYP: '2',
+      });
+
+      const postData = formData.toString();
+
+      const response = await httpRequest({
+        hostname: this.ipAddress,
+        port: 80,
+        path: '/PoEPortConfig.cgi',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+          'Cookie': sidCookie,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      }, postData);
+
+      if (response.statusCode !== 200) {
+        throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
+      }
     }
   }
 
