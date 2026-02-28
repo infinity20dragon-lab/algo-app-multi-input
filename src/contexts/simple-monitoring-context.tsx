@@ -697,6 +697,30 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         const enabledCount = [medicalStream, fireStream, allCallStream].filter(s => s !== null).length;
         addLog(`${enabledCount} input stream(s) acquired`, 'info');
 
+        // Diagnostic: log audio track details for each stream
+        const streamDiag = [
+          { name: 'Medical', stream: medicalStream },
+          { name: 'Fire', stream: fireStream },
+          { name: 'AllCall', stream: allCallStream },
+        ];
+        for (const { name, stream: s } of streamDiag) {
+          if (s) {
+            const tracks = s.getAudioTracks();
+            for (const track of tracks) {
+              const settings = track.getSettings();
+              console.log(`[AudioDiag] ${name} track:`, {
+                label: track.label,
+                enabled: track.enabled,
+                muted: track.muted,
+                readyState: track.readyState,
+                sampleRate: settings.sampleRate,
+                channelCount: settings.channelCount,
+                deviceId: settings.deviceId?.substring(0, 16) + '...',
+              });
+            }
+          }
+        }
+
         if (enabledCount === 0) {
           throw new Error('At least one input must be enabled with a device selected');
         }
