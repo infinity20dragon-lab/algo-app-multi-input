@@ -109,9 +109,9 @@ export class NetgearGS308EPController {
   }
 
   /**
-   * Get the rand value from the login page
+   * Get the rand value and initial SID cookie from the login page
    */
-  private async getRandValue(): Promise<string> {
+  private async getLoginPageData(): Promise<{ rand: string; initialSid: string | null }> {
     const response = await httpRequest({
       hostname: this.ipAddress,
       port: 80,
@@ -129,7 +129,17 @@ export class NetgearGS308EPController {
       throw new Error('Rand value not found in login page');
     }
 
-    return randMatch[1];
+    // Capture the initial SID cookie (needed for the POST)
+    let initialSid: string | null = null;
+    const cookies = response.headers['set-cookie'];
+    if (cookies) {
+      const sidMatch = cookies.join(';').match(/SID=([^;]+)/);
+      if (sidMatch) {
+        initialSid = `SID=${sidMatch[1]}`;
+      }
+    }
+
+    return { rand: randMatch[1], initialSid };
   }
 
   /**
@@ -160,8 +170,8 @@ export class NetgearGS308EPController {
    * Perform the actual login (called only once, results are cached)
    */
   private async performLogin(): Promise<string> {
-    // Get rand value
-    const rand = await this.getRandValue();
+    // Get rand value and initial SID from login page
+    const { rand, initialSid } = await this.getLoginPageData();
 
     // Merge password with rand, then hash
     const merged = merge(this.password, rand);
@@ -169,18 +179,25 @@ export class NetgearGS308EPController {
 
     const postData = `password=${hashedPassword}`;
 
+    const headers: Record<string, string | number> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(postData),
+      'Origin': `http://${this.ipAddress}`,
+      'Referer': `http://${this.ipAddress}/login.cgi`,
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+    };
+
+    // Send the initial SID cookie with the POST (same as browser behavior)
+    if (initialSid) {
+      headers['Cookie'] = initialSid;
+    }
+
     const response = await httpRequest({
       hostname: this.ipAddress,
       port: 80,
       path: '/login.cgi',
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postData),
-        'Origin': `http://${this.ipAddress}`,
-        'Referer': `http://${this.ipAddress}/login.cgi`,
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-      },
+      headers,
     }, postData);
 
     if (response.statusCode !== 200) {
@@ -416,7 +433,7 @@ export class NetgearGS308EPController {
    */
   async testConnection(): Promise<boolean> {
     try {
-      await this.getRandValue();
+      await this.getLoginPageData();
       return true;
     } catch (error) {
       console.error('Switch connection test failed:', error);
@@ -426,13 +443,40 @@ export class NetgearGS308EPController {
 }
 
 /**
- * Factory function to create a controller for any PoE switch type
+ * Shared controller cache — one instance per switch IP, reuses sessions
+ */
+const controllerCache = new Map<string, NetgearGS308EPController>();
+
+/**
+ * Factory function to create (or reuse) a controller for any PoE switch type.
+ * Controllers are cached by IP so all API calls share the same session.
  */
 export function createPoEController(type: string, credentials: PoESwitchCredentials) {
+  const cacheKey = `${type}:${credentials.ipAddress}`;
+
+  const existing = controllerCache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  let controller: NetgearGS308EPController;
   switch (type) {
     case 'netgear_gs308ep':
-      return new NetgearGS308EPController(credentials);
+      controller = new NetgearGS308EPController(credentials);
+      break;
     default:
       throw new Error(`Unsupported PoE switch type: ${type}`);
+  }
+
+  controllerCache.set(cacheKey, controller);
+  return controller;
+}
+
+/**
+ * Clear all cached controller sessions (call on monitoring stop)
+ */
+export function clearAllPoESessions(): void {
+  for (const controller of controllerCache.values()) {
+    controller.clearSession();
   }
 }
