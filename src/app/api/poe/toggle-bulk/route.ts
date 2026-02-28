@@ -53,49 +53,27 @@ export async function POST(request: Request) {
 
       const portConfigs = ports.map(p => ({ portNumber: p.portNumber, enabled: p.enabled }));
 
-      if (parallel) {
-        // Parallel mode — 2 ports at a time (switch can't handle all at once)
-        const concurrency = 2;
-        console.log(`[PoE Bulk] Parallel mode: toggling ${ports.length} ports (${concurrency} at a time)`);
-        const portResults = await controller.togglePortsParallel(portConfigs, concurrency);
+      // Both modes use single-session batch — difference is delay between ports
+      const effectiveDelay = parallel ? 0 : delay;
+      console.log(`[PoE Bulk] ${parallel ? 'Fast' : 'Sequential'} mode: toggling ${ports.length} ports (delay: ${effectiveDelay}ms)`);
 
-        for (let i = 0; i < ports.length; i++) {
-          const port = ports[i];
-          const result = portResults[i];
-          if (result.success) {
-            console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
-            await updatePoEDevice(port.deviceId, {
-              isEnabled: port.enabled,
-              lastToggled: new Date(),
-              isOnline: true,
-            });
-          } else {
-            console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${result.error}`);
-          }
-          results.push({ deviceId: port.deviceId, success: result.success, error: result.error });
+      const portResults = await controller.togglePortsBatch(portConfigs, effectiveDelay);
+
+      // Update Firestore for each result
+      for (let i = 0; i < ports.length; i++) {
+        const port = ports[i];
+        const result = portResults[i];
+        if (result.success) {
+          console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
+          await updatePoEDevice(port.deviceId, {
+            isEnabled: port.enabled,
+            lastToggled: new Date(),
+            isOnline: true,
+          });
+        } else {
+          console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${result.error}`);
         }
-      } else {
-        // Sequential mode — one port at a time via batch method (single session)
-        console.log(`[PoE Bulk] Sequential mode: toggling ${ports.length} ports (delay: ${delay}ms)`);
-        for (const port of ports) {
-          try {
-            await controller.togglePort(port.portNumber, port.enabled);
-            console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
-            await updatePoEDevice(port.deviceId, {
-              isEnabled: port.enabled,
-              lastToggled: new Date(),
-              isOnline: true,
-            });
-            results.push({ deviceId: port.deviceId, success: true });
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${msg}`);
-            results.push({ deviceId: port.deviceId, success: false, error: msg });
-          }
-          if (delay > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
-        }
+        results.push({ deviceId: port.deviceId, success: result.success, error: result.error });
       }
 
       await updatePoESwitch(switchId, { isOnline: true, lastSeen: new Date() });

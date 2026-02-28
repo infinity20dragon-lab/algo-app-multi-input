@@ -376,129 +376,77 @@ export class NetgearGS308EPController {
   }
 
   /**
-   * Toggle multiple ports sequentially with a single session
+   * Toggle multiple ports with a single session — login once, then tight sequential loop.
+   * Returns per-port results. Bypasses the per-call enqueue overhead.
    */
-  async togglePorts(ports: PoEPortConfig[]): Promise<void> {
-    if (ports.length === 0) return;
+  async togglePortsBatch(ports: PoEPortConfig[], delay: number = 0): Promise<Array<{ port: number; success: boolean; error?: string }>> {
+    if (ports.length === 0) return [];
 
-    return this.enqueue(async () => {
+    const results: Array<{ port: number; success: boolean; error?: string }> = [];
+
     // Login once
     const sidCookie = await this.login();
 
-    for (const port of ports) {
-      if (port.portNumber < 1 || port.portNumber > 8) continue;
-
-      // Get fresh hash token for each toggle (switch requires it)
-      const hash = await this.getHashToken(sidCookie);
-      const portID = port.portNumber - 1;
-
-      const formData = new URLSearchParams({
-        hash: hash,
-        ACTION: 'Apply',
-        portID: portID.toString(),
-        ADMIN_MODE: port.enabled ? '1' : '0',
-        PORT_PRIO: '0',
-        POW_MOD: '3',
-        POW_LIMT_TYP: '2',
-        POW_LIMT: '30.0',
-        DETEC_TYP: '2',
-        DISCONNECT_TYP: '2',
-      });
-
-      const postData = formData.toString();
-
-      const response = await httpRequest({
-        hostname: this.ipAddress,
-        port: 80,
-        path: '/PoEPortConfig.cgi',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(postData),
-          'Cookie': sidCookie,
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      }, postData);
-
-      if (response.statusCode !== 200) {
-        throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
+    for (let i = 0; i < ports.length; i++) {
+      const port = ports[i];
+      if (port.portNumber < 1 || port.portNumber > 8) {
+        results.push({ port: port.portNumber, success: false, error: 'Invalid port number' });
+        continue;
       }
-    }
-    }); // end enqueue
-  }
 
-  /**
-   * Toggle multiple ports with limited concurrency — bypasses the serialization queue.
-   * Processes `concurrency` ports at a time (default 2) to avoid overwhelming the switch.
-   */
-  async togglePortsParallel(ports: PoEPortConfig[], concurrency: number = 2): Promise<Array<{ port: number; success: boolean; error?: string }>> {
-    if (ports.length === 0) return [];
+      try {
+        // Get fresh hash token for each toggle (switch requires it)
+        const hash = await this.getHashToken(sidCookie);
+        const portID = port.portNumber - 1;
 
-    // Login once (shared session)
-    const sidCookie = await this.login();
+        const formData = new URLSearchParams({
+          hash: hash,
+          ACTION: 'Apply',
+          portID: portID.toString(),
+          ADMIN_MODE: port.enabled ? '1' : '0',
+          PORT_PRIO: '0',
+          POW_MOD: '3',
+          POW_LIMT_TYP: '2',
+          POW_LIMT: '30.0',
+          DETEC_TYP: '2',
+          DISCONNECT_TYP: '2',
+        });
 
-    const allResults: Array<{ port: number; success: boolean; error?: string }> = [];
+        const postData = formData.toString();
 
-    // Process in chunks of `concurrency`
-    for (let i = 0; i < ports.length; i += concurrency) {
-      const chunk = ports.slice(i, i + concurrency);
+        const response = await httpRequest({
+          hostname: this.ipAddress,
+          port: 80,
+          path: '/PoEPortConfig.cgi',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(postData),
+            'Cookie': sidCookie,
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        }, postData);
 
-      const chunkResults = await Promise.allSettled(
-        chunk.map(async (port) => {
-          if (port.portNumber < 1 || port.portNumber > 8) {
-            throw new Error(`Invalid port: ${port.portNumber}`);
-          }
+        if (response.statusCode !== 200) {
+          throw new Error(`HTTP ${response.statusCode}`);
+        }
 
-          const hash = await this.getHashToken(sidCookie);
-          const portID = port.portNumber - 1;
-
-          const formData = new URLSearchParams({
-            hash: hash,
-            ACTION: 'Apply',
-            portID: portID.toString(),
-            ADMIN_MODE: port.enabled ? '1' : '0',
-            PORT_PRIO: '0',
-            POW_MOD: '3',
-            POW_LIMT_TYP: '2',
-            POW_LIMT: '30.0',
-            DETEC_TYP: '2',
-            DISCONNECT_TYP: '2',
-          });
-
-          const postData = formData.toString();
-
-          const response = await httpRequest({
-            hostname: this.ipAddress,
-            port: 80,
-            path: '/PoEPortConfig.cgi',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Content-Length': Buffer.byteLength(postData),
-              'Cookie': sidCookie,
-              'X-Requested-With': 'XMLHttpRequest',
-            },
-          }, postData);
-
-          if (response.statusCode !== 200) {
-            throw new Error(`Failed to toggle port ${port.portNumber}: ${response.statusCode}`);
-          }
-
-          return port.portNumber;
-        })
-      );
-
-      for (let j = 0; j < chunk.length; j++) {
-        const r = chunkResults[j];
-        allResults.push({
-          port: chunk[j].portNumber,
-          success: r.status === 'fulfilled',
-          error: r.status === 'rejected' ? (r.reason as Error)?.message : undefined,
+        results.push({ port: port.portNumber, success: true });
+      } catch (error) {
+        results.push({
+          port: port.portNumber,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
         });
       }
+
+      // Optional delay between ports (only between, not after last)
+      if (delay > 0 && i < ports.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
 
-    return allResults;
+    return results;
   }
 
   /**
