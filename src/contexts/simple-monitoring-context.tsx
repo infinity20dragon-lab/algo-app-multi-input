@@ -283,6 +283,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const recorderRef = useRef<SimpleRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const linkedSpeakersRef = useRef<any[]>([]);
+  const controlPoEDevicesRef = useRef<(enable: boolean) => Promise<void>>(async () => {});
   const splitContextRef = useRef<AudioContext | null>(null);
   // Native audio bridge refs
   const nativeBridgeContextRef = useRef<AudioContext | null>(null);
@@ -957,7 +958,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       await recorderRef.current.initializeHardware();
 
       // Ensure all PoE devices are OFF on start (clean state)
-      await controlPoEDevices(false);
+      await controlPoEDevicesRef.current(false);
 
       setIsMonitoring(true);
       addLog('✅ Monitoring started', 'info');
@@ -1003,7 +1004,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       }
 
       // Ensure all PoE devices are OFF on stop
-      await controlPoEDevices(false);
+      controlPoEDevicesRef.current(false);
 
       linkedSpeakersRef.current = [];
       setIsMonitoring(false);
@@ -1013,7 +1014,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       addLog(`Failed to stop: ${error}`, 'error');
       console.error('Failed to stop monitoring:', error);
     }
-  }, [controlPoEDevices]);
+  }, []);
 
   // Audio level callback
   const onAudioDetected = useCallback((level: number) => {
@@ -1250,6 +1251,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
 
     await Promise.allSettled(promises);
   }, [poeDevices, selectedDevices, devices, emulationMode, addLog]);
+
+  // Keep ref in sync for use in stopMonitoring (which is defined before controlPoEDevices)
+  controlPoEDevicesRef.current = controlPoEDevices;
 
   // Emergency Controls — speakers and PoE devices
   const emergencyKillAll = useCallback(async () => {
