@@ -1361,7 +1361,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
           await fetch('/api/poe/toggle-bulk', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ devices: eligibleDevices.map((d: any) => ({ deviceId: d.id, enabled: false })) }),
+            body: JSON.stringify({ devices: eligibleDevices.map((d: any) => ({ deviceId: d.id, enabled: false })), parallel: poeParallelMode, delay: poeToggleDelay }),
           });
         } catch (error) {
           addLog(`⚠️ PoE force off error: ${error instanceof Error ? error.message : 'Unknown'}`, 'warning');
@@ -1390,7 +1390,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         }
       }, 1000);
     }
-  }, [emulationMode, poeDevices, poeAutoDisabled, poeKeepAliveDuration, sendPoEToggle, clearPoECountdown, addLog]);
+  }, [emulationMode, poeDevices, poeAutoDisabled, poeKeepAliveDuration, poeParallelMode, poeToggleDelay, selectedDevices, devices, sendPoEToggle, clearPoECountdown, addLog]);
 
   // Keep ref in sync for use in stopMonitoring (which is defined before controlPoEDevices)
   controlPoEDevicesRef.current = controlPoEDevices;

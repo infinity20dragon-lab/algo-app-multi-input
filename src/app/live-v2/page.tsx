@@ -1432,7 +1432,34 @@ function LiveV2Content() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="py-0 pb-3 space-y-1.5 max-h-[250px] overflow-y-auto">
+                <CardContent className="py-0 pb-3 space-y-1.5">
+                  <div className="flex items-center gap-3 pb-1.5 mb-1.5 border-b border-[var(--border-color)]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-[var(--text-muted)]">Mode:</span>
+                      <button
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${poeParallelMode ? 'bg-[var(--accent-yellow)]/15 text-[var(--accent-yellow)]' : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'}`}
+                        onClick={() => setPoeParallelMode(!poeParallelMode)}
+                      >
+                        {poeParallelMode ? 'Parallel' : 'Sequential'}
+                      </button>
+                    </div>
+                    {!poeParallelMode && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-[var(--text-muted)]">Delay:</span>
+                        <select
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+                          value={poeToggleDelay}
+                          onChange={(e) => setPoeToggleDelay(parseInt(e.target.value))}
+                        >
+                          <option value={0}>None</option>
+                          <option value={500}>500ms</option>
+                          <option value={1000}>1s</option>
+                          <option value={2000}>2s</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <div className="max-h-[200px] overflow-y-auto space-y-1.5">
                   {poeDevices
                     .filter((d: any) => d.mode === 'auto')
                     .map((device: any) => {
@@ -1459,30 +1486,6 @@ function LiveV2Content() {
                         </div>
                       );
                     })}
-                  <div className="pt-2 mt-2 border-t border-[var(--border-color)] space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-[var(--text-muted)]">Parallel Mode</span>
-                      <Switch
-                        checked={poeParallelMode}
-                        onCheckedChange={setPoeParallelMode}
-                      />
-                    </div>
-                    {!poeParallelMode && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-[var(--text-muted)]">Toggle Delay</span>
-                        <select
-                          className="text-[10px] px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-                          value={poeToggleDelay}
-                          onChange={(e) => setPoeToggleDelay(parseInt(e.target.value))}
-                        >
-                          <option value={0}>None</option>
-                          <option value={500}>500ms</option>
-                          <option value={1000}>1s</option>
-                          <option value={2000}>2s</option>
-                          <option value={3000}>3s</option>
-                        </select>
-                      </div>
-                    )}
                   </div>
                 </CardContent>
               </Card>
