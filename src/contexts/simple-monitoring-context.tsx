@@ -1375,8 +1375,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     const hasEnabledDevices = poeDevices.some((d: any) => d.mode === 'auto' && !poeAutoDisabled.has(d.id));
     if (!hasEnabledDevices && !force) return;
 
-    // Clear any pending countdown
+    // Clear any pending countdown AND stale queued actions
     clearPoECountdown();
+    poeQueuedActionRef.current = null;
 
     if (enable) {
       // Turn ON immediately (if not already on)
@@ -1416,6 +1417,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       if (eligibleDevices.length > 0) {
         addLog(`💡 PoE: FORCE OFF — ${eligibleDevices.map((d: any) => d.name).join(', ')}`, 'info');
         poeToggleInFlightRef.current = true;
+        poeToggleInFlightActionRef.current = false;
         try {
           await fetch('/api/poe/toggle-bulk', {
             method: 'POST',
@@ -1426,6 +1428,15 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
           addLog(`⚠️ PoE force off error: ${error instanceof Error ? error.message : 'Unknown'}`, 'warning');
         } finally {
           poeToggleInFlightRef.current = false;
+          poeToggleInFlightActionRef.current = null;
+
+          // Process queued action (e.g., ON queued during force-OFF from audio detection)
+          const queuedAction = poeQueuedActionRef.current;
+          if (queuedAction !== null) {
+            poeQueuedActionRef.current = null;
+            console.log(`[PoE] Processing queued action after force-OFF: ${queuedAction ? 'ON' : 'OFF'}`);
+            sendPoEToggle(queuedAction);
+          }
         }
       }
     } else {
