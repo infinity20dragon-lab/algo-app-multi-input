@@ -1372,6 +1372,7 @@ export class SimpleRecorder {
       let isAudioSustained = false;
       let channelMediaRecorder: MediaRecorder | null = null;
       let channelSessionId: string | null = null;
+      let currentQueueItem: PlaybackQueueItem | null = null; // Direct reference — no search needed
       let currentChannelBatches: AudioBatch[] = [];
       let currentChannelChunks: Blob[] = [];
 
@@ -1384,18 +1385,14 @@ export class SimpleRecorder {
           this.log(`⏱️ [${channel.toUpperCase()}] Silence timeout - stopping recording`);
 
           // Mark the queue item as complete + snapshot drain target for this channel's buffer.
-          // The item may already be dequeued into currentPlaybackItem (actively playing),
-          // so search both the queue AND currentPlaybackItem.
-          const itemToComplete =
-            this.playbackQueue.find(item => item.sessionId === channelSessionId && !item.isComplete) ||
-            (this.currentPlaybackItem?.sessionId === channelSessionId && !this.currentPlaybackItem.isComplete
-              ? this.currentPlaybackItem
-              : undefined);
-          if (itemToComplete) {
+          // Uses direct object reference (currentQueueItem) instead of searching by sessionId.
+          if (currentQueueItem && !currentQueueItem.isComplete) {
             const channelBufAvailable = this.channelRingBuffers.get(channel)?.getAvailable() ?? 0;
-            itemToComplete.drainTarget = channelBufAvailable;
-            itemToComplete.isComplete = true;
+            currentQueueItem.drainTarget = channelBufAvailable;
+            currentQueueItem.isComplete = true;
             this.log(`📊 [${channel.toUpperCase()}] Session complete: ${channelBufAvailable} samples to drain (${(channelBufAvailable / (this.audioContext?.sampleRate || 48000)).toFixed(1)}s)`);
+          } else {
+            this.log(`⚠️ [${channel.toUpperCase()}] Silence timeout but no active queue item (session: ${channelSessionId})`, 'warning');
           }
 
           // Stop MediaRecorder
@@ -1478,6 +1475,7 @@ export class SimpleRecorder {
                 isComplete: false,
                 playbackStarted: false,
               };
+              currentQueueItem = queueItem; // Keep direct reference for silence timeout
               this.playbackQueue.push(queueItem);
               this.log(`📥 [${channel.toUpperCase()}] Queued for playback (queue length: ${this.playbackQueue.length})`);
 
@@ -1662,13 +1660,13 @@ export class SimpleRecorder {
         }
 
         // Safety: detect stuck playback item (buffer empty + isComplete never set)
-        // At 48kHz with 128-sample frames, 18750 callbacks ≈ 50 seconds of empty buffer.
-        // If a session has been pulling silence for 50s with no isComplete, something went wrong.
+        // At 48kHz with 128-sample frames, 3750 callbacks ≈ 10 seconds of empty buffer.
+        // If a session has been pulling silence for 10s with no isComplete, something went wrong.
         if (channelBuf.getAvailable() === 0 && !item.isComplete) {
           this.emptyBufferCallbackCount++;
-          // ~50 seconds of silence = definitely stuck (normal silence timeout is ~2-5s)
-          if (this.emptyBufferCallbackCount > 18750) {
-            this.log(`⚠️ [${item.channel.toUpperCase()}] Safety: force-completing stuck session ${item.sessionId} (buffer empty for ~50s, isComplete never set)`, 'warning');
+          // ~10 seconds of silence = definitely stuck (normal silence timeout is ~2-5s)
+          if (this.emptyBufferCallbackCount > 3750) {
+            this.log(`⚠️ [${item.channel.toUpperCase()}] Safety: force-completing stuck session ${item.sessionId} (buffer empty for ~10s, isComplete never set)`, 'warning');
             item.isComplete = true;
             item.drainTarget = 0;
             this.emptyBufferCallbackCount = 0;
