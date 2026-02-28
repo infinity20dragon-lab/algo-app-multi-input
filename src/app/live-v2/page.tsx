@@ -137,6 +137,10 @@ function LiveV2Content() {
     poeAutoDisabled,
     togglePoEAutoControl,
     setPoeAllAutoEnabled,
+    poeParallelMode,
+    setPoeParallelMode,
+    poeToggleDelay,
+    setPoeToggleDelay,
     emergencyKillAll,
     emergencyEnableAll,
     controlSingleSpeaker,
@@ -1455,6 +1459,31 @@ function LiveV2Content() {
                         </div>
                       );
                     })}
+                  <div className="pt-2 mt-2 border-t border-[var(--border-color)] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[var(--text-muted)]">Parallel Mode</span>
+                      <Switch
+                        checked={poeParallelMode}
+                        onCheckedChange={setPoeParallelMode}
+                      />
+                    </div>
+                    {!poeParallelMode && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-[var(--text-muted)]">Toggle Delay</span>
+                        <select
+                          className="text-[10px] px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+                          value={poeToggleDelay}
+                          onChange={(e) => setPoeToggleDelay(parseInt(e.target.value))}
+                        >
+                          <option value={0}>None</option>
+                          <option value={500}>500ms</option>
+                          <option value={1000}>1s</option>
+                          <option value={2000}>2s</option>
+                          <option value={3000}>3s</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )}

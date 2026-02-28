@@ -5,7 +5,11 @@ import { createPoEController } from "@/lib/poe/controller";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { devices } = body as { devices: Array<{ deviceId: string; enabled: boolean }> };
+    const { devices, parallel = false, delay = 0 } = body as {
+      devices: Array<{ deviceId: string; enabled: boolean }>;
+      parallel?: boolean;
+      delay?: number;
+    };
 
     if (!devices || !Array.isArray(devices) || devices.length === 0) {
       return NextResponse.json(
@@ -39,7 +43,6 @@ export async function POST(request: Request) {
       });
     }
 
-    // Toggle each switch's ports sequentially (one switch at a time, one port at a time)
     const results: Array<{ deviceId: string; success: boolean; error?: string }> = [];
 
     for (const [switchId, { poeSwitch, ports }] of switchGroups) {
@@ -48,28 +51,38 @@ export async function POST(request: Request) {
         password: poeSwitch.password,
       });
 
-      // Toggle ports sequentially using single session
-      for (const port of ports) {
+      const togglePort = async (port: typeof ports[0]) => {
         try {
           await controller.togglePort(port.portNumber, port.enabled);
           console.log(`[PoE Bulk] ${port.enabled ? 'ON' : 'OFF'} port ${port.portNumber} (${port.deviceName})`);
-
-          // Update device state in Firestore
           await updatePoEDevice(port.deviceId, {
             isEnabled: port.enabled,
             lastToggled: new Date(),
             isOnline: true,
           });
-
           results.push({ deviceId: port.deviceId, success: true });
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Unknown error';
           console.error(`[PoE Bulk] Failed port ${port.portNumber}: ${msg}`);
           results.push({ deviceId: port.deviceId, success: false, error: msg });
         }
+      };
+
+      if (parallel) {
+        // Parallel mode — all ports at once (fast, needs DoS prevention OFF)
+        console.log(`[PoE Bulk] Parallel mode: toggling ${ports.length} ports at once`);
+        await Promise.allSettled(ports.map(togglePort));
+      } else {
+        // Sequential mode — one port at a time (safe)
+        console.log(`[PoE Bulk] Sequential mode: toggling ${ports.length} ports (delay: ${delay}ms)`);
+        for (const port of ports) {
+          await togglePort(port);
+          if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
       }
 
-      // Update switch status
       await updatePoESwitch(switchId, { isOnline: true, lastSeen: new Date() });
     }
 

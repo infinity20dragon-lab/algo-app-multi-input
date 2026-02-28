@@ -176,6 +176,10 @@ interface SimpleMonitoringContextType {
   poeAutoDisabled: Set<string>;
   togglePoEAutoControl: (deviceId: string) => void;
   setPoeAllAutoEnabled: (enabled: boolean) => void;
+  poeParallelMode: boolean;
+  setPoeParallelMode: (enabled: boolean) => void;
+  poeToggleDelay: number;
+  setPoeToggleDelay: (ms: number) => void;
 
   // Emergency Controls
   emergencyKillAll: () => Promise<void>;
@@ -282,6 +286,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   // PoE Control
   const [poeKeepAliveDuration, setPoeKeepAliveDuration] = useState(240000); // 4 minutes default
   const [poeAutoDisabled, setPoeAutoDisabled] = useState<Set<string>>(new Set());
+  const [poeParallelMode, setPoeParallelMode] = useState(false); // false = sequential (safe), true = parallel (fast)
+  const [poeToggleDelay, setPoeToggleDelay] = useState(0); // delay between sequential toggles in ms
 
   // Emulation
   const [emulationMode, setEmulationMode] = useState(false);
@@ -454,6 +460,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
 
     // Load PoE settings
     if (sessionState.poeKeepAliveDuration !== undefined) setPoeKeepAliveDuration(sessionState.poeKeepAliveDuration);
+    if (sessionState.poeParallelMode !== undefined) setPoeParallelMode(sessionState.poeParallelMode);
+    if (sessionState.poeToggleDelay !== undefined) setPoeToggleDelay(sessionState.poeToggleDelay);
   }, [sessionState]);
 
   // Sync settings to RTDB when they change
@@ -507,6 +515,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       fireNativeDeviceId,
       allCallNativeDeviceId,
       poeKeepAliveDuration,
+      poeParallelMode,
+      poeToggleDelay,
     });
   }, [
     selectedDevices,
@@ -522,7 +532,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     medicalChannel, fireChannel, allCallChannel,
     zonedPlayback, zoneScheduleEnabled,
     useNativeAudio, medicalNativeDeviceId, fireNativeDeviceId, allCallNativeDeviceId,
-    poeKeepAliveDuration,
+    poeKeepAliveDuration, poeParallelMode, poeToggleDelay,
     syncSessionState,
   ]);
 
@@ -976,8 +986,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       addLog('Initializing hardware...', 'info');
       await recorderRef.current.initializeHardware();
 
-      // Ensure all PoE devices are OFF on start (clean state)
-      await controlPoEDevicesRef.current(false);
+      // Ensure all PoE devices are OFF on start (force — no countdown)
+      await controlPoEDevicesRef.current(false, true);
 
       setIsMonitoring(true);
       addLog('✅ Monitoring started', 'info');
@@ -1268,6 +1278,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           devices: eligiblePoEDevices.map((d: any) => ({ deviceId: d.id, enabled: enable })),
+          parallel: poeParallelMode,
+          delay: poeToggleDelay,
         }),
       });
       if (!response.ok) {
@@ -1282,7 +1294,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     } catch (error) {
       addLog(`⚠️ PoE error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
     }
-  }, [poeDevices, poeAutoDisabled, selectedDevices, devices, addLog]);
+  }, [poeDevices, poeAutoDisabled, poeParallelMode, poeToggleDelay, selectedDevices, devices, addLog]);
 
   // Toggle individual PoE device auto-control (include/exclude from auto-control)
   const togglePoEAutoControl = useCallback((deviceId: string) => {
@@ -1314,9 +1326,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       return;
     }
 
-    // Check if any PoE devices are auto-enabled
+    // Check if any PoE devices are auto-enabled (force mode bypasses this)
     const hasEnabledDevices = poeDevices.some((d: any) => d.mode === 'auto' && !poeAutoDisabled.has(d.id));
-    if (!hasEnabledDevices) return;
+    if (!hasEnabledDevices && !force) return;
 
     // Clear any pending countdown
     clearPoECountdown();
@@ -1331,10 +1343,29 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
         console.log('[PoE] Timer reset — lights stay ON');
       }
     } else if (force) {
-      // FORCE OFF — immediate (stop monitoring / emergency)
-      if (poeIsOnRef.current) {
-        poeIsOnRef.current = false;
-        await sendPoEToggle(false);
+      // FORCE OFF — immediate (stop monitoring / emergency), ALL auto devices regardless of toggle state
+      poeIsOnRef.current = false;
+      // Send to all auto PoE devices (bypass poeAutoDisabled filter)
+      const allAutoDevices = poeDevices.filter((d: any) => d.mode === 'auto');
+      const activePagingDeviceIds = selectedDevices.filter(deviceId => {
+        const device = devices.find((d: any) => d.id === deviceId);
+        return device && device.type === '8301';
+      });
+      const eligibleDevices = allAutoDevices.filter((d: any) => {
+        if (!d.linkedPagingDeviceIds || d.linkedPagingDeviceIds.length === 0) return false;
+        return d.linkedPagingDeviceIds.some((id: string) => activePagingDeviceIds.includes(id));
+      });
+      if (eligibleDevices.length > 0) {
+        addLog(`💡 PoE: FORCE OFF — ${eligibleDevices.map((d: any) => d.name).join(', ')}`, 'info');
+        try {
+          await fetch('/api/poe/toggle-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devices: eligibleDevices.map((d: any) => ({ deviceId: d.id, enabled: false })) }),
+          });
+        } catch (error) {
+          addLog(`⚠️ PoE force off error: ${error instanceof Error ? error.message : 'Unknown'}`, 'warning');
+        }
       }
     } else {
       // Start countdown with per-second logging
@@ -1560,6 +1591,10 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     poeAutoDisabled,
     togglePoEAutoControl,
     setPoeAllAutoEnabled,
+    poeParallelMode,
+    setPoeParallelMode,
+    poeToggleDelay,
+    setPoeToggleDelay,
 
     // Emergency Controls
     emergencyKillAll,
