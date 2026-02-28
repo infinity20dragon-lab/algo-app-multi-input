@@ -433,14 +433,12 @@ export class NetgearGS308EPController {
           throw new Error(`HTTP ${response.statusCode}`);
         }
 
-        // Parse next hash from POST response (avoids a separate GET)
+        // Try to parse next hash from POST response (avoids a separate GET)
         const nextHash = response.body.match(/name='hash'[^>]*value="([^"]+)"/);
         if (nextHash) {
           currentHash = nextHash[1];
-        } else if (i < ports.length - 1) {
-          // Fallback: fetch hash with GET if POST response didn't contain one
-          currentHash = await this.getHashToken(sidCookie);
         }
+        // Otherwise reuse currentHash — Netgear accepts the same hash for the session
 
         results.push({ port: port.portNumber, success: true });
       } catch (error) {
