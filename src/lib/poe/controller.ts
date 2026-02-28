@@ -261,10 +261,53 @@ export class NetgearGS308EPController {
     // Extract SID cookie
     const cookies = response.headers['set-cookie'];
     if (!cookies) {
-      // Log response body to understand why login failed
-      const bodySnippet = response.body.substring(0, 200);
-      console.error(`[PoE] Login POST returned no cookies. Status: ${response.statusCode}, Body: ${bodySnippet}`);
-      throw new Error(`No cookies received from login (body: ${bodySnippet})`);
+      // No cookies = likely session limit reached (stale session from crashed app)
+      // Try to force-clear by hitting logout with the initial SID, then retry once
+      console.warn(`[PoE] No cookies from login — session limit likely reached. Forcing logout and retrying...`);
+      if (initialSid) {
+        await this.logout(initialSid);
+      }
+      // Also try logout without cookie (some firmware versions accept it)
+      await this.logout('');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Retry login from scratch
+      const retry = await this.getLoginPageData();
+      const retryMerged = merge(this.password, retry.rand);
+      const retryHash = md5(retryMerged);
+      const retryPostData = `password=${retryHash}`;
+
+      const retryHeaders: Record<string, string | number> = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(retryPostData),
+        'Origin': `http://${this.ipAddress}`,
+        'Referer': `http://${this.ipAddress}/login.cgi`,
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      };
+      if (retry.initialSid) {
+        retryHeaders['Cookie'] = retry.initialSid;
+      }
+
+      const retryResponse = await httpRequest({
+        hostname: this.ipAddress,
+        port: 80,
+        path: '/login.cgi',
+        method: 'POST',
+        headers: retryHeaders,
+      }, retryPostData);
+
+      const retryCookies = retryResponse.headers['set-cookie'];
+      if (!retryCookies) {
+        throw new Error('Login failed after retry — switch session may still be locked. Wait a few minutes or power cycle the switch.');
+      }
+
+      const retrySidMatch = retryCookies.join(';').match(/SID=([^;]+)/);
+      if (!retrySidMatch) {
+        throw new Error('SID cookie not found after retry');
+      }
+
+      console.log(`[PoE] Login succeeded on retry`);
+      return `SID=${retrySidMatch[1]}`;
     }
 
     const sidMatch = cookies.join(';').match(/SID=([^;]+)/);
