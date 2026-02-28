@@ -377,7 +377,8 @@ export class NetgearGS308EPController {
 
   /**
    * Toggle multiple ports with a single session — login once, then tight sequential loop.
-   * Returns per-port results. Bypasses the per-call enqueue overhead.
+   * Chains hash tokens from POST responses to avoid redundant GET requests.
+   * Flow: 1 GET (first hash) + N POSTs (each returns next hash) = N+1 requests instead of 2N.
    */
   async togglePortsBatch(ports: PoEPortConfig[], delay: number = 0): Promise<Array<{ port: number; success: boolean; error?: string }>> {
     if (ports.length === 0) return [];
@@ -387,6 +388,9 @@ export class NetgearGS308EPController {
     // Login once
     const sidCookie = await this.login();
 
+    // Fetch initial hash (only GET needed for the entire batch)
+    let currentHash = await this.getHashToken(sidCookie);
+
     for (let i = 0; i < ports.length; i++) {
       const port = ports[i];
       if (port.portNumber < 1 || port.portNumber > 8) {
@@ -395,12 +399,10 @@ export class NetgearGS308EPController {
       }
 
       try {
-        // Get fresh hash token for each toggle (switch requires it)
-        const hash = await this.getHashToken(sidCookie);
         const portID = port.portNumber - 1;
 
         const formData = new URLSearchParams({
-          hash: hash,
+          hash: currentHash,
           ACTION: 'Apply',
           portID: portID.toString(),
           ADMIN_MODE: port.enabled ? '1' : '0',
@@ -431,6 +433,15 @@ export class NetgearGS308EPController {
           throw new Error(`HTTP ${response.statusCode}`);
         }
 
+        // Parse next hash from POST response (avoids a separate GET)
+        const nextHash = response.body.match(/name='hash'[^>]*value="([^"]+)"/);
+        if (nextHash) {
+          currentHash = nextHash[1];
+        } else if (i < ports.length - 1) {
+          // Fallback: fetch hash with GET if POST response didn't contain one
+          currentHash = await this.getHashToken(sidCookie);
+        }
+
         results.push({ port: port.portNumber, success: true });
       } catch (error) {
         results.push({
@@ -438,6 +449,14 @@ export class NetgearGS308EPController {
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
         });
+        // If a port fails, fetch a fresh hash for the next attempt
+        if (i < ports.length - 1) {
+          try {
+            currentHash = await this.getHashToken(sidCookie);
+          } catch {
+            // If we can't even get a hash, remaining ports will likely fail too
+          }
+        }
       }
 
       // Optional delay between ports (only between, not after last)
