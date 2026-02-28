@@ -1977,6 +1977,14 @@ export class SimpleRecorder {
     this.log(`🔊 Activating ${linkedSpeakers.length} speaker${linkedSpeakers.length !== 1 ? 's' : ''}...`);
     this.log('');
 
+    // Enable PoE devices (lights, etc.) IMMEDIATELY — fire and forget, don't block speakers
+    if (this.config.controlPoEDevices) {
+      this.log('💡 Enabling PoE devices (background, before speaker warmup)...');
+      this.config.controlPoEDevices(true).catch(poeError => {
+        this.log(`⚠️ PoE activation error (non-fatal): ${poeError}`, 'warning');
+      });
+    }
+
     try {
       // Set linked speakers' mcast.zone1 to active IP (in parallel)
       if (linkedSpeakers.length > 0) {
@@ -2000,14 +2008,6 @@ export class SimpleRecorder {
 
       // Wait for speaker warmup (hides white noise)
       await new Promise(resolve => setTimeout(resolve, this.config.playbackDelay));
-
-      // Enable PoE devices (lights, etc.) — fire and forget, don't block playback
-      if (this.config.controlPoEDevices) {
-        this.log('💡 Enabling PoE devices (background)...');
-        this.config.controlPoEDevices(true).catch(poeError => {
-          this.log(`⚠️ PoE activation error (non-fatal): ${poeError}`, 'warning');
-        });
-      }
 
       this.hardwareState = HardwareState.STABLE;
       this.log(`✅ Speaker warmup complete (${this.config.playbackDelay}ms) - safe to unmute`);

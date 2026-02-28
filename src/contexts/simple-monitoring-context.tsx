@@ -310,6 +310,9 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
   const poeOffTimerRef = useRef<NodeJS.Timeout | null>(null);
   const poeCountdownRef = useRef<NodeJS.Timeout | null>(null);
   const poeIsOnRef = useRef(false);
+  const poeToggleInFlightRef = useRef(false); // prevents duplicate bulk toggle calls
+  const poeToggleInFlightActionRef = useRef<boolean | null>(null); // tracks what action is in-flight (true=ON, false=OFF)
+  const poeQueuedActionRef = useRef<boolean | null>(null); // queued next action (true=ON, false=OFF, null=nothing)
   const splitContextRef = useRef<AudioContext | null>(null);
   // Native audio bridge refs
   const nativeBridgeContextRef = useRef<AudioContext | null>(null);
@@ -1256,8 +1259,21 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     }
   }, []);
 
-  // Low-level PoE toggle (sends the actual API call)
+  // Low-level PoE toggle (sends the actual API call) — with in-flight guard + queue
   const sendPoEToggle = useCallback(async (enable: boolean) => {
+    // If a toggle is already in-flight, queue this action instead of dropping it
+    if (poeToggleInFlightRef.current) {
+      // Skip if same action as what's currently in-flight (redundant)
+      if (poeToggleInFlightActionRef.current === enable) {
+        console.log(`[PoE] Skipping ${enable ? 'ON' : 'OFF'} — same action already in-flight`);
+        return;
+      }
+      // Queue the new action (overwrites any previous queued action)
+      console.log(`[PoE] Queuing ${enable ? 'ON' : 'OFF'} — toggle in-flight`);
+      poeQueuedActionRef.current = enable;
+      return;
+    }
+
     // Get PoE devices in auto mode, excluding user-disabled ones
     const autoPoEDevices = poeDevices.filter((d: any) => d.mode === 'auto' && !poeAutoDisabled.has(d.id));
     if (autoPoEDevices.length === 0) return;
@@ -1278,6 +1294,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
 
     addLog(`💡 PoE: ${enable ? 'ON' : 'OFF'} — ${eligiblePoEDevices.map((d: any) => d.name).join(', ')}`, 'info');
 
+    poeToggleInFlightRef.current = true;
+    poeToggleInFlightActionRef.current = enable;
     try {
       const response = await fetch('/api/poe/toggle-bulk', {
         method: 'POST',
@@ -1299,6 +1317,17 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       }
     } catch (error) {
       addLog(`⚠️ PoE error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'warning');
+    } finally {
+      poeToggleInFlightRef.current = false;
+      poeToggleInFlightActionRef.current = null;
+
+      // Process queued action if any
+      const queuedAction = poeQueuedActionRef.current;
+      if (queuedAction !== null) {
+        poeQueuedActionRef.current = null;
+        console.log(`[PoE] Processing queued action: ${queuedAction ? 'ON' : 'OFF'}`);
+        sendPoEToggle(queuedAction);
+      }
     }
   }, [poeDevices, poeAutoDisabled, poeParallelMode, poeToggleDelay, selectedDevices, devices, addLog]);
 
@@ -1361,6 +1390,19 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
     } else if (force) {
       // FORCE OFF — immediate (stop monitoring / emergency), ALL auto devices regardless of toggle state
       poeIsOnRef.current = false;
+
+      // Wait for any in-flight toggle to finish before force-OFF
+      if (poeToggleInFlightRef.current) {
+        console.log('[PoE] Waiting for in-flight toggle before force-OFF...');
+        await new Promise<void>(resolve => {
+          const check = setInterval(() => {
+            if (!poeToggleInFlightRef.current) { clearInterval(check); resolve(); }
+          }, 200);
+          // Safety timeout — don't wait forever
+          setTimeout(() => { clearInterval(check); resolve(); }, 15000);
+        });
+      }
+
       // Send to all auto PoE devices (bypass poeAutoDisabled filter)
       const allAutoDevices = poeDevices.filter((d: any) => d.mode === 'auto');
       const activePagingDeviceIds = selectedDevices.filter(deviceId => {
@@ -1373,6 +1415,7 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
       });
       if (eligibleDevices.length > 0) {
         addLog(`💡 PoE: FORCE OFF — ${eligibleDevices.map((d: any) => d.name).join(', ')}`, 'info');
+        poeToggleInFlightRef.current = true;
         try {
           await fetch('/api/poe/toggle-bulk', {
             method: 'POST',
@@ -1381,6 +1424,8 @@ export function SimpleMonitoringProvider({ children }: { children: React.ReactNo
           });
         } catch (error) {
           addLog(`⚠️ PoE force off error: ${error instanceof Error ? error.message : 'Unknown'}`, 'warning');
+        } finally {
+          poeToggleInFlightRef.current = false;
         }
       }
     } else {
